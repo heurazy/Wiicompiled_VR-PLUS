@@ -15,7 +15,6 @@ Set-StrictMode -Version 3.0
 . (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1')
 
 $repoRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$releaseVersion = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version
 $outputRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory))
 $portableTools = [IO.Path]::GetFullPath((Join-Path $repoRoot $PortableToolsDirectory))
 $dependencySources = [IO.Path]::GetFullPath((Join-Path $repoRoot $DependencySourceDirectory))
@@ -99,7 +98,7 @@ Assert-File (Join-Path $portableTools 'Ninja\ninja.exe') 'Portable Ninja'
 # to compile (launcher/Prepare-NativePrebuilt.ps1).
 # Kept in step with InstalledLayout.DependencyNames by Test-PinnedFacts.ps1: the installed host
 # refuses to call a toolkit complete unless every one of these directories is present.
-$requiredDependencies = @('abseil-cpp','cppwinrt','dawn_prebuilt','fmt','freetype','imgui','libusb','native_prebuilt','openxr','png','SDL','sqlite3','tracy','vulkan_headers','xxhash','zlib','zstd')
+$requiredDependencies = @('abseil-cpp','cppwinrt','dawn_prebuilt','fmt','freetype','imgui','libusb','native_prebuilt','openxr','png','SDL','sqlite3','tracy','xxhash','zlib','zstd')
 $missingSources = @($requiredDependencies | Where-Object { $_ -ne 'native_prebuilt' } |
     Where-Object { -not (Test-Path -LiteralPath (Join-Path $dependencySources $_) -PathType Container) })
 if ($missingSources.Count -gt 0) {
@@ -220,13 +219,6 @@ Copy-Directory (Join-Path $repoRoot 'projects\mkwii') (Join-Path $workspace 'pro
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LocalBuild.ps1') -Destination (Join-Path $workspace 'LocalBuild.ps1')
 # LocalBuild.ps1 dot-sources the canonical configure flags from this sibling.
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1') -Destination (Join-Path $workspace 'NativeBuildFlags.ps1')
-# --build-quest compiles the player's translation for the Meta Quest app with these; they are not
-# part of any toolkit fingerprint, so shipping them never invalidates a PC product.
-$workspaceAndroid = Join-Path $workspace 'android'
-New-Item -ItemType Directory -Force $workspaceAndroid | Out-Null
-foreach ($script in 'QuestGameKit.psm1', 'Build-QuestGame.ps1') {
-    Copy-Item -LiteralPath (Join-Path $repoRoot "android\$script") -Destination (Join-Path $workspaceAndroid $script)
-}
 [IO.Directory]::CreateDirectory((Join-Path $workspace 'Dependencies')) | Out-Null
 foreach ($name in $requiredDependencies) { Copy-Directory (Join-Path $dependencySources $name) (Join-Path $workspace "Dependencies\$name") }
 
@@ -290,8 +282,7 @@ foreach ($required in @('ToolkitFingerprint','TranslationFingerprint','NativeToo
 
 $manifest = [ordered]@{
     SchemaVersion = 2
-    ProductVersion = $releaseVersion
-    ProductId = 'wiicompiled-openxr-vr'
+    ProductVersion = '0.4.3'
     ExpectedGameId = $pins.GameId
     ExpectedDolSha256 = $pins.DolSha256
     ExpectedRelSha256 = $pins.RelSha256

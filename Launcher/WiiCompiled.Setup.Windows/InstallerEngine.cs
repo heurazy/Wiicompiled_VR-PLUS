@@ -309,6 +309,7 @@ internal sealed class InstallerEngine
         transaction.Publish();
         transaction.RecordRuntimeConfigurationMutation(configSnapshot);
         RuntimeConfiguration.SetDvdRoot(configPath, Path.Combine(installDirectory, "GameAssets", "DATA"));
+        RuntimeConfiguration.EnsureVrEnabledByDefault(configPath);
         // The runtime scans this directory live for its asset overlay, so it is recorded on every
         // operation that receives one and is never rewritten by a base-only operation.
         if (canonicalRetroRoot is not null)

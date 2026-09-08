@@ -78,6 +78,7 @@ internal static class SelfTests
             RuntimeConfiguration.SetRetroRewindRoot, RuntimeConfiguration.RemoveRetroRewindRootIfOwned),
             failures);
         Test("Runtime configuration key matching", TestRuntimeConfigurationKeyMatching, failures);
+        Test("VR is enabled for new installations", TestVrEnabledDefault, failures);
         Test("Install location validation", TestInstallLocationValidation, failures);
         Test("Command line contract", TestCommandLineContract, failures);
         Test("Portable root discovery", TestPortableRootDiscovery, failures);
@@ -252,6 +253,28 @@ internal static class SelfTests
             File.WriteAllText(config, "[paths]\r\ndvd_root = \"a\\\"#b\"\r\n");
             if (RuntimeConfiguration.GetPath(config, "dvd_root") != "a\"#b")
                 throw new Exception("A '#' inside an escaped quoted value was treated as a comment.");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void TestVrEnabledDefault()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "mkwc-vr-default-" + Guid.NewGuid().ToString("N"));
+        var config = Path.Combine(root, RuntimeConfiguration.ConfigFileName);
+        try
+        {
+            Directory.CreateDirectory(root);
+            RuntimeConfiguration.EnsureVrEnabledByDefault(config);
+            if (RuntimeConfiguration.GetRawValue(config, "vr", "enabled") != "true")
+                throw new Exception("A new VR installation did not enable OpenXR.");
+
+            File.WriteAllText(config, "[vr]\r\nenabled = false\r\n");
+            RuntimeConfiguration.EnsureVrEnabledByDefault(config);
+            if (RuntimeConfiguration.GetRawValue(config, "vr", "enabled") != "false")
+                throw new Exception("An explicit user VR preference was overwritten.");
         }
         finally
         {

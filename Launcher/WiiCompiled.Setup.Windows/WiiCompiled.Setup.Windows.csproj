@@ -1,15 +1,17 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>WiiCompiled.Setup</AssemblyName>
     <RootNamespace>WiiCompiled.Setup.Windows</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Version>0.4.3</Version>
     <Authors>patchzy</Authors>
-    <Product>WiiCompiled OpenXR VR</Product>
-    <Description>Command-line installer and launcher for WiiCompiled</Description>
+    <Product>WiiCompiled</Product>
+    <Description>Graphical and command-line installer for WiiCompiled VR</Description>
     <DebugType>embedded</DebugType>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>

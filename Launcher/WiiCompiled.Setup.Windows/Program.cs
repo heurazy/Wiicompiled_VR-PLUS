@@ -1,9 +1,8 @@
-﻿namespace WiiCompiled.Setup.Windows;
-
-using System.Runtime.InteropServices;
+namespace WiiCompiled.Setup.Windows;
 
 internal static class Program
 {
+    [STAThread]
     private static int Main(string[] args)
     {
         var progressJson = CommandLine.WantsProgressJson(args);
@@ -12,14 +11,8 @@ internal static class Program
         {
             PlatformChecks.EnsureSupportedHost();
 
-            if (args.Length == 0 && GetConsoleProcessList(new uint[1], 1) == 1)
-            {
-                Console.Out.WriteLine(
-                    "Mario Kart WiiCompiled is installed through Wheel Wizard - download it from " +
-                    "https://github.com/iChris4/WheelWizard_VR");
-                Console.ReadKey(intercept: true);
-                return 0;
-            }
+            if (args.Length == 0)
+                return EnglishInstaller.Run();
 
             CommandLine command;
             try
@@ -37,8 +30,6 @@ internal static class Program
 
             if (command.Mode == AppMode.Version)
                 return ConsoleCommands.Version();
-            if (command.Mode == AppMode.InfoJson)
-                return ConsoleCommands.InfoJson();
 
             if (command.Mode == AppMode.Help)
                 return ConsoleCommands.Help();
@@ -56,12 +47,6 @@ internal static class Program
             {
                 using var cancellationSignal = CancellationSignal.ObserveEnvironment();
                 return ConsoleCommands.CheckProducts(command, cancellationSignal.Token);
-            }
-
-            if (command.Mode == AppMode.BuildQuest)
-            {
-                using var cancellationSignal = CancellationSignal.ObserveEnvironment();
-                return ConsoleCommands.BuildQuest(command, cancellationSignal.Token).GetAwaiter().GetResult();
             }
 
             if (command.Mode is AppMode.LaunchBase or AppMode.LaunchRetro)
@@ -109,10 +94,6 @@ internal static class Program
         }
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern uint GetConsoleProcessList(
-        [Out] uint[] processList,
-        uint processCount);
 }
 
 internal static class PlatformChecks
@@ -128,9 +109,8 @@ internal static class PlatformChecks
 
 internal static class ProductInfo
 {
-    public const string Name = "WiiCompiled OpenXR VR";
-    public const string Id = "wiicompiled-openxr-vr";
-    public static string Version => typeof(ProductInfo).Assembly.GetName().Version!.ToString(3);
+    public const string Name = "WiiCompiled";
+    public const string Version = "0.4.3";
 
     /// <summary>
     /// The setup executable is copied into the installation under this name. It is the launcher and
@@ -138,8 +118,8 @@ internal static class ProductInfo
     /// </summary>
     public const string SetupCopyName = "WiiCompiled-Setup.exe";
 
-    public const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WiiCompiledOpenXRVR";
+    public const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WiiCompiled";
     public static string DefaultInstallDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs", "WiiCompiledOpenXRVR");
+            "Programs", "WiiCompiled");
 }

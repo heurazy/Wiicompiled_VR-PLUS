@@ -65,6 +65,18 @@ public static class RuntimeConfiguration
     public static void SetRetroRewindRoot(string configPath, string retroRewindRoot) =>
         SetPath(configPath, "retro_rewind_root", retroRewindRoot);
 
+    /// <summary>
+    /// Enables VR for a new installation while preserving an explicit choice already saved by the
+    /// user through the in-game settings menu.
+    /// </summary>
+    public static void EnsureVrEnabledByDefault(string configPath)
+    {
+        if (GetRawValue(configPath, "vr", "enabled") is not null) return;
+        var lines = ReadLinesOrDefault(configPath);
+        SetSectionValue(lines, "vr", "enabled", "true");
+        WriteLines(configPath, lines);
+    }
+
     /// <summary>The canonical Retro Rewind root, or null when no installation has recorded one.</summary>
     public static string? GetRetroRewindRoot(string configPath) =>
         GetResolvedPath(configPath, "retro_rewind_root");

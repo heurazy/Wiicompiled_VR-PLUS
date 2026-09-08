@@ -1,18 +1,5 @@
-<img width="4190" height="2464" alt="Mario Kart WiiCompiled VR logo (logo by Inkwreck)" src="docs/images/wiicompiled-vr-logo.png" />
 
-# WiiCompiled OpenXR VR
-
-<p align="center">
-  <a href="https://github.com/patchzyy/Wiicompiled/releases"><img alt="Windows 10 / 11, x64" src="https://img.shields.io/badge/Windows-10%20%2F%2011%20%C2%B7%20x64-0078D4"></a>
-  <a href="https://github.com/patchzyy/Wiicompiled/releases"><img alt="Linux, x64 / ARM64" src="https://img.shields.io/badge/Linux-x64%20%2F%20ARM64-FCC624?logo=linux&amp;logoColor=white"></a>
-  <a href="https://github.com/patchzyy/Wiicompiled/releases"><img alt="macOS 14+, Apple Silicon" src="https://img.shields.io/badge/macOS-14%2B%20%C2%B7%20Apple%20Silicon-0A84FF?logo=apple&amp;logoColor=white"></a>
-</p>
-<p align="center">
-  <a href="#building-from-source"><img alt="PowerPC static recompilation" src="https://img.shields.io/badge/PowerPC-static%20recompilation-FF9F0A"></a>
-  <a href="#retro-rewind"><img alt="Retro Rewind supported" src="https://img.shields.io/badge/Retro%20Rewind-supported-FF375F"></a>
-  <a href="https://github.com/TeamWheelWizard/WheelWizard/releases"><img alt="Install with Wheel Wizard" src="https://img.shields.io/badge/install%20with-Wheel%20Wizard-8B5CF6"></a>
-  <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-2EA44F?logo=gnu&amp;logoColor=white"></a>
-</p>
+# Mario Kart Wii VR Port
 
 A native PC port of Mario Kart Wii, made with static recompilation.
 
@@ -25,7 +12,7 @@ anywhere at runtime.
 > toolchain, the translation runs on your machine against your disc image, and nothing ever gets
 > uploaded.
 
-[Download WheelWizard VR](https://github.com/iChris4/WheelWizard_VR/releases/latest)
+[I just want to play](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
 
 ---
 
@@ -49,15 +36,16 @@ The graphics layer is built on
 **High internal resolution.** 
 Play at several times the console's resolution.
 
-**Experimental OpenXR VR.**
-Windows builds can render through an OpenXR runtime on D3D12, or on Vulkan with a custom Dawn
-build, without CPU readback. Menus and
-unsupported scenes appear as a head-locked virtual screen; a validated single-camera race switches
-to immersive stereo rendering. VR is opt-in and falls back to the normal desktop renderer if the
-runtime or headset is unavailable. In first person you sit in the cockpit, where the steering wheel
-or handlebar turns with your steering, and hand steering by heurazy lets you grab it with the
-tracked controllers and turn it. See [`OPENXR.md`](OPENXR.md) for setup, configuration, and the
-current limitations.
+**OpenXR VR.**
+Windows builds render through a D3D12 OpenXR runtime without CPU readback. Press the right Quest
+stick to switch between the original game camera, first person, and a distant diorama view. The
+track map and item panel can follow the left hand. Quest Touch controls include steering, throttle,
+brake, drifting, items, tricks, look back, menu navigation, and an in-game stick calibration page.
+The English VR settings menu also provides per-eye resolution presets, sharp rendering, FPS display,
+camera placement, world scale, and HUD placement. Standard bindings cover Meta/Oculus Touch,
+Touch Pro, Valve Index, Microsoft Mixed Reality, Samsung Odyssey, HTC Vive, PICO, and
+simple-controller profiles.
+See [`OPENXR.md`](OPENXR.md) for Windows setup, configuration, controls, and current limitations.
 
 **Music ducking.** 
 Start playing something else, Spotify, a YouTube video, and
@@ -69,26 +57,35 @@ Press **F10** while the game window has focus:
 - Internal resolution
 - FPS counter
 - Controller assignment for all four ports
-- Full per-controller button mapping, including the bumpers
-- Dolphin-syntax input expressions and GCPadNew.ini import
-- Controller vibration on/off
+- Full per-controller button mapping
 - Volume, instant mute, and the music ducking toggle
 
 Everything you change is saved to `Config.toml` on the spot and restored next launch.
 
-**Dolphin-compatible input expressions.** 
-Each GameCube control can carry an expression in Dolphin's input syntax, with the same operators
-and the same functions.
-A Dolphin `GCPadNew.ini` can be imported directly from the F10 bar.
-
-**Vibration toggle.** 
-Force feedback can be turned off for every port at once.
+**Real controller support.** 
+Controllers are fed to the game as a GameCube controller.
+Mappings are positional (`south`, `east`, `west`, `north`) rather than Xbox-labelled, so the
+same config makes sense on Xbox, PlayStation, Nintendo and generic SDL pads alike, and extra
+inputs like paddles, touchpads and share buttons show up when the hardware reports them.
 The official Wii U / Switch GameCube adapter (WUP-028) works too; as with Dolphin, on Windows the
 adapter must be switched to the WinUSB driver once (Zadig).
 
 **Real Wii Remotes over Bluetooth.**
 Pair a Wii Remote with Windows (Settings > Bluetooth > Add device, press 1+2 or SYNC, leave the
-PIN empty)
+PIN empty) and the game reads it as an actual Wii Remote through KPAD: Wii Remote icons and
+prompts, Wii Wheel tilt steering, wheelies and tricks all come from the game's own motion code.
+Nunchuk and Classic Controller are real Wii extensions too: the game gets the Nunchuk's stick,
+C/Z and accelerometer, and the Classic Controller through `KPADGetUnifiedWpadStatus` with its own
+layout and icons, so its buttons do what the game says they do and no mapping is involved. Plug an
+extension in or pull it out mid-game and the game switches control scheme like on the console
+(the runtime patches SDL's Wii driver, which otherwise loses the remote for good on an extension
+change). Only the Wii U Pro Controller, which has no Wii-era equivalent, is fed to the game as a
+GameCube pad with Nintendo's layout. If a remote drops out or was switched on after launch, the
+runtime keeps rescanning Bluetooth until it comes back (F10 > Controller settings > Wii Remotes). SDL's read of
+the remote's factory accelerometer calibration often times out over Bluetooth (`console.log`
+then says "Using fallback accelerometer calibration") and it falls back to a nominal zero point,
+so the same menu has a one-button calibration (remote flat, buttons up) that removes the small
+tilt offset some remotes show.
 
 Known limitations of the Wii Remote path:
 - No IR pointer yet: menus are navigated with the D-pad and A (the game treats the remote as
@@ -100,45 +97,14 @@ Known limitations of the Wii Remote path:
 - Turn the Wii Remote support off in that menu if you use a Mayflash DolphinBar, which already
   presents the remote as a regular gamepad.
 
-**USB steering wheels and pedals.**
-Ported from heurazy's [mario-kart-wii-VR-port](https://github.com/heurazy/mario-kart-wii-VR-port).
-Open **F10 > Controllers > USB wheel and pedals (player 1)**; it is also in the headset's settings
-panel. Pick the steering device and axis and record full left, full right and centre, then each
-pedal's released and fully pressed positions. Assign the right paddle to drift and the left paddle to
-items; trick, confirm, pause and back are optional. Any wheel SDL sees as a joystick works this way,
-with no gamepad mapping: separate USB pedals, reversed axes and combined pedal axes (select the same
-axis for both pedals) all calibrate the same. The settings are saved in `PhysicalWheel.toml` beside
-`Config.toml`.
-
-The wheel is player 1's GameCube controller. Press its confirm button at the title screen so the game
-uses a GameCube controller; its D-pad, confirm and back then work the menus. In a race it owns
-steering and the pedals. The brake pedal brakes, then reverses, and beats the accelerator and drift.
-In VR, the cockpit's wheel turns with it and hand steering steps aside. Setting the VR controllers to
-**Gamepad** keeps them for menus, pause and item aiming alongside the wheel. Light vibration is
-optional, off by default, capped at 15 % and follows the game's own rumble. No centering spring or
-steering force is requested.
-
-Logitech wheels (G29, G920, G923, G27, G25, Driving Force GT, PRO Racing Wheel) are recognised by SDL
-as wheels and marked "(wheel)" in the device list. This has not been tried on a physical wheel yet:
-- Install Logitech G HUB (Logitech Gaming Software for a G27 or G25). Without the driver a Logitech
-  wheel starts in a compatibility mode, typically with a smaller rotation range and both pedals on
-  one axis. A G920 or G923 for Xbox also starts as an Xbox controller, which the game would read as
-  an ordinary pad.
-- Set a G29's mode switch to PS3 on PC.
-- Full lock is wherever you record full left and right. Recording them a quarter turn each way
-  (90°) matches the VR cockpit's wheel, or lower the operating range in G HUB.
-- A Driving Force Shifter's gears reach the game as buttons of the wheel and can be assigned like
-  any other. A gear stays pressed while it is engaged: on the item button it keeps the item held
-  behind you until you shift back to neutral. The clutch is not used.
-- Turn on the centering spring in G HUB if you want the wheel to self-centre.
-
 ## Requirements
 
 - Windows 10 or 11, 64-bit
 - GPU: GTX 1650 / RX 6400 / Arc A310 or higher
 - CPU: Intel Core i5-8400 / AMD Ryzen 5 2600 (4c/6c, ~3.5GHz+) or higher
 - About 20 GB of free disk space during installation (Final game size ~5 GB)
-- This fork's packaged release supports Windows x64. Other platforms are not release targets.
+- macOS 14 (Sonoma) or later on Apple Silicon
+- On macOS, Apple Xcode Command Line Tools (Setup opens Apple's installer when they are missing)
 - A clean, unmodified **PAL `RMCP01`** disc image of Mario Kart Wii, dumped by you. ISO, GCM,
   GCZ, CISO, WBFS, WIA and RVZ are accepted.
 
@@ -154,27 +120,28 @@ regions, patched executables) is rejected outright.
 
 ## Installing
 
-Use [WheelWizard VR](https://github.com/iChris4/WheelWizard_VR/releases/latest). Select your clean PAL
-`RMCP01` image in Settings, then open **Settings → Other → WiiCompiled (beta)** and enable
-**Enable WiiCompiled OpenXR VR (beta)**. Press Install on Home. Installation builds both Base game
-and Retro Rewind locally using the bundled toolchain; a developer toolchain is not required.
+Download `WiiCompiled-VR-Portable-v0.4.3.zip` from the
+[latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest). This is the only
+published package and includes the English installer plus the integrated Wheel Wizard launcher.
+Extract the complete archive, run `WiiCompiled-VR-Setup.exe`, choose the ROM, keep portable mode
+enabled, then launch `WheelWizard\WheelWizard.exe`. You can select **Mario Kart Wii VR** or
+**Retro Rewind VR** from the full-width game selector.
 
-Home lets you choose **Base game** or **Retro Rewind**. The normal WiiCompiled switch selects the
-original backend; turning both switches off selects Dolphin. Only one recompilation switch can
-be enabled at a time. VR uses a separate `RecompVR` installation beside the normal `Recomp` folder.
-Saves and Miis use the normal installation's effective NAND; Retro Rewind retains its separate
-XML-directed saves and ghosts. Graphics, VR preferences, caches, and compiled binaries stay separate.
-Uninstalling either backend in WheelWizard VR preserves configuration and shared progress.
+The installer downloads and installs the latest Retro Rewind pack from Wheel Wizard's official
+service by default. Clear that option to select an existing `RetroRewind6` folder or install only
+the base VR game.
+Setup enables OpenXR by default for both Mario Kart Wii VR and Retro Rewind VR. The in-game
+settings menu can still save an explicit desktop-mode preference.
+Downloads are staged on the installation drive, so automatic installation also works when the
+Windows temporary folder and the portable installation are on different drives.
 
-Managed VR launches enable OpenXR with D3D12; the Vulkan binding is opt-in through
-`video.graphics_api` (see [OPENXR.md](OPENXR.md)). If the runtime or headset is unavailable, the game
-continues on the desktop and displays the failure briefly; **F10 → VR** retains the explanation.
-See [OpenXR configuration](OPENXR.md) and [distribution and validation](DISTRIBUTION.md).
+The download contains no Nintendo code, translated game code, game assets, or ROM. Translation
+and compilation happen locally from the disc image you select.
 
 
 > [!CAUTION]
 > Only take builds from this repository's
-> [Releases](https://github.com/iChris4/Wiicompiled_VR/releases) page. If someone's sharing an
+> [Releases](https://github.com/heurazy/mario-kart-wii-VR-port/releases) page. If someone's sharing an
 > installer through Discord or some random download site, don't touch it!!
 
 ## A note on related projects
@@ -210,9 +177,7 @@ The default test suite needs no binaries and no host C++ compiler, so you can ha
 translator without any game data around.
 
 For everything beyond that, feeding in your own `main.dol`/`StaticR.rel`, running the
-translation, generating the manifest and build graph, and compiling, see [`translator/README.md`](translator/README.md).
-
-For a step-by-step guide on compiling both WiiCompiled and Retro Rewind from source on macOS (Apple Silicon), see the [macOS Build Guide](docs/building-macos.md).
+translation, generating the manifest and build graph, and compiling. see [`translator/README.md`](translator/README.md).
 
 ## FAQ
 
@@ -261,15 +226,13 @@ AI coding tools were used during development of this project.
 All translated output is verified against real hardware behavior and most importantly, physics accuracy is proven synced across Wii, Dolphin, and WiiCompiled (see FAQ). 
 
 ## Credits
-- **inkwreck** - making the logo
+
 - **[aurora](https://github.com/encounter/aurora)** - the GX rendering/windowing backend this
   project's whole graphics layer sits on. MIT licensed.
 - **[Dawn](https://dawn.googlesource.com/dawn)** - Google's WebGPU implementation, powering
   aurora's Direct3D, Vulkan and OpenGL backends.
 - **[OpenXR](https://www.khronos.org/openxr/)** - the Khronos cross-platform API used by the
   experimental VR renderer.
-- **heurazy** - the VR cockpit's turning steering wheel and hand steering, ported from
-  **[mario-kart-wii-VR-port](https://github.com/heurazy/mario-kart-wii-VR-port)** (GPL-3.0).
 - **[Dolphin Emulator](https://github.com/dolphin-emu/dolphin)** - an invaluable reference for Wii
   hardware behavior during development, plus the source of the free DSP coefficient ROM and the
   unmodified default WiiConnect24 bootstrap tree bundled with the runtime.
