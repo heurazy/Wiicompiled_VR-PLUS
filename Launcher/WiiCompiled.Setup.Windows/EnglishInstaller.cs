@@ -1,7 +1,6 @@
 namespace WiiCompiled.Setup.Windows;
 
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Text.Json;
 using System.Windows.Forms;
 
@@ -20,13 +19,6 @@ internal static class EnglishInstaller
         private readonly TextBox _romPath = new() { Dock = DockStyle.Fill, ReadOnly = true };
         private readonly TextBox _retroPath = new() { Dock = DockStyle.Fill, ReadOnly = true };
         private readonly TextBox _destination = new() { Dock = DockStyle.Fill };
-        private readonly CheckBox _downloadRetro = new()
-        {
-            Text = "Download and install Retro Rewind automatically (recommended)",
-            Checked = true,
-            AutoSize = true
-        };
-        private Button _retroBrowse = null!;
         private readonly CheckBox _portable = new() { Text = "Create a portable installation", AutoSize = true };
         private readonly Button _install = new() { Text = "Install", AutoSize = true, Padding = new Padding(18, 5, 18, 5) };
         private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100 };
@@ -52,7 +44,7 @@ internal static class EnglishInstaller
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             MinimizeBox = true;
-            ClientSize = new System.Drawing.Size(720, 610);
+            ClientSize = new System.Drawing.Size(720, 570);
             Font = new System.Drawing.Font("Segoe UI", 10F);
 
             var title = new Label
@@ -63,7 +55,7 @@ internal static class EnglishInstaller
             };
             var explanation = new Label
             {
-                Text = "Choose your own clean PAL RMCP01 disc image. By default, setup also downloads the latest Retro Rewind pack from the official Wheel Wizard service. Your ROM stays on this PC.",
+                Text = "Choose your own clean PAL RMCP01 disc image. ISO, GCM, GCZ, CISO, WBFS, WIA, and RVZ are supported. You may also select an existing RetroRewind6 folder. Your files stay on this PC.",
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 MaximumSize = new System.Drawing.Size(680, 0)
@@ -74,7 +66,7 @@ internal static class EnglishInstaller
                 Dock = DockStyle.Fill,
                 Padding = new Padding(20),
                 ColumnCount = 3,
-                RowCount = 11
+                RowCount = 10
             };
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -84,7 +76,6 @@ internal static class EnglishInstaller
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 55));
             layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -97,16 +88,7 @@ internal static class EnglishInstaller
             layout.SetColumnSpan(explanation, 3);
             AddPathRow(layout, 2, "PAL disc image", _romPath, "Browse...", BrowseRom);
             AddPathRow(layout, 3, "Install location", _destination, "Browse...", BrowseDestination);
-            layout.Controls.Add(_downloadRetro, 1, 4);
-            layout.SetColumnSpan(_downloadRetro, 2);
-            _retroBrowse = AddPathRow(layout, 5, "Existing RR folder", _retroPath, "Browse...", BrowseRetro);
-            _retroPath.Enabled = false;
-            _retroBrowse.Enabled = false;
-            _downloadRetro.CheckedChanged += (_, _) =>
-            {
-                _retroPath.Enabled = !_downloadRetro.Checked;
-                _retroBrowse.Enabled = !_downloadRetro.Checked;
-            };
+            AddPathRow(layout, 4, "Retro Rewind folder", _retroPath, "Optional...", BrowseRetro);
             _destination.Text = StandardDestination;
             _destination.TextChanged += (_, _) => _destinationWasEdited = true;
             _portable.CheckedChanged += (_, _) =>
@@ -115,13 +97,13 @@ internal static class EnglishInstaller
                 _destination.Text = _portable.Checked ? PortableDestination : StandardDestination;
                 _destinationWasEdited = false;
             };
-            layout.Controls.Add(_portable, 1, 6);
+            layout.Controls.Add(_portable, 1, 5);
             layout.SetColumnSpan(_portable, 2);
-            layout.Controls.Add(_progress, 0, 7);
+            layout.Controls.Add(_progress, 0, 6);
             layout.SetColumnSpan(_progress, 3);
-            layout.Controls.Add(_status, 0, 8);
+            layout.Controls.Add(_status, 0, 7);
             layout.SetColumnSpan(_status, 3);
-            layout.Controls.Add(_details, 0, 9);
+            layout.Controls.Add(_details, 0, 8);
             layout.SetColumnSpan(_details, 3);
 
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, AutoSize = true };
@@ -130,7 +112,7 @@ internal static class EnglishInstaller
             _install.Click += async (_, _) => await InstallAsync();
             buttons.Controls.Add(close);
             buttons.Controls.Add(_install);
-            layout.Controls.Add(buttons, 0, 10);
+            layout.Controls.Add(buttons, 0, 9);
             layout.SetColumnSpan(buttons, 3);
             Controls.Add(layout);
             AcceptButton = _install;
@@ -143,7 +125,7 @@ internal static class EnglishInstaller
             }
         }
 
-        private static Button AddPathRow(TableLayoutPanel layout, int row, string label, Control input,
+        private static void AddPathRow(TableLayoutPanel layout, int row, string label, Control input,
             string buttonText, EventHandler browse)
         {
             var caption = new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left };
@@ -153,7 +135,6 @@ internal static class EnglishInstaller
             layout.Controls.Add(caption, 0, row);
             layout.Controls.Add(input, 1, row);
             layout.Controls.Add(button, 2, row);
-            return button;
         }
 
         private void BrowseRom(object? sender, EventArgs e)
@@ -183,7 +164,7 @@ internal static class EnglishInstaller
         {
             using var dialog = new FolderBrowserDialog
             {
-                Description = "Choose an existing RetroRewind6 folder, or enable automatic download",
+                Description = "Optionally choose an existing RetroRewind6 folder",
                 UseDescriptionForTitle = true,
                 ShowNewFolderButton = false
             };
@@ -223,15 +204,6 @@ internal static class EnglishInstaller
                 : Path.GetFullPath(_destination.Text);
             try
             {
-                var retroPath = _retroPath.Text;
-                if (_downloadRetro.Checked)
-                {
-                    var retroParent = _portable.Checked
-                        ? Path.GetFullPath(_destination.Text)
-                        : installDirectory;
-                    retroPath = await DownloadLatestRetroRewindAsync(retroParent);
-                }
-
                 var start = new ProcessStartInfo(executable)
                 {
                     UseShellExecute = false,
@@ -247,10 +219,10 @@ internal static class EnglishInstaller
                 start.ArgumentList.Add(installDirectory);
                 start.ArgumentList.Add("--progress-json");
                 if (_portable.Checked) start.ArgumentList.Add("--portable");
-                if (!string.IsNullOrWhiteSpace(retroPath))
+                if (!string.IsNullOrWhiteSpace(_retroPath.Text))
                 {
                     start.ArgumentList.Add("--retro-dir");
-                    start.ArgumentList.Add(retroPath);
+                    start.ArgumentList.Add(_retroPath.Text);
                     start.ArgumentList.Add("--download-retro-wfc-payload");
                 }
 
@@ -269,9 +241,7 @@ internal static class EnglishInstaller
                             var message = root.GetProperty("message").GetString() ?? "Working...";
                             var percent = root.GetProperty("percent").GetInt32();
                             _status.Text = message;
-                            _progress.Value = string.IsNullOrWhiteSpace(retroPath)
-                                ? Math.Clamp(percent, 0, 100)
-                                : Math.Clamp(40 + percent * 60 / 100, 40, 100);
+                            _progress.Value = Math.Clamp(percent, 0, 100);
                             _details.AppendText(message + Environment.NewLine);
                         }
                         else if (type == "result" && !root.GetProperty("success").GetBoolean())
@@ -315,107 +285,12 @@ internal static class EnglishInstaller
         {
             _install.Enabled = !busy;
             _portable.Enabled = !busy;
-            _downloadRetro.Enabled = !busy;
-            _retroPath.Enabled = !busy && !_downloadRetro.Checked;
-            _retroBrowse.Enabled = !busy && !_downloadRetro.Checked;
             UseWaitCursor = busy;
-        }
-
-        private async Task<string> DownloadLatestRetroRewindAsync(string destinationParent)
-        {
-            const string officialEndpoint = "https://update.rwfc.net/RetroRewind/RetroRewindInstall.txt";
-            // Keep staging on the destination volume because Directory.Move cannot cross drives.
-            destinationParent = Path.GetFullPath(destinationParent);
-            Directory.CreateDirectory(destinationParent);
-            var temporaryRoot = Path.Combine(destinationParent,
-                ".wiicompiled-retro-" + Guid.NewGuid().ToString("N"));
-            var archivePath = Path.Combine(temporaryRoot, "RetroRewind.zip");
-            var extractionPath = Path.Combine(temporaryRoot, "Extracted");
-            Directory.CreateDirectory(temporaryRoot);
-            try
-            {
-                _status.Text = "Finding the latest Retro Rewind release...";
-                _details.AppendText(_status.Text + Environment.NewLine);
-                using var client = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("WiiCompiled-VR-Setup/0.4.3");
-                var downloadText = (await client.GetStringAsync(officialEndpoint)).Trim();
-                if (!Uri.TryCreate(downloadText, UriKind.Absolute, out var downloadUri) ||
-                    downloadUri.Scheme != Uri.UriSchemeHttps ||
-                    !(downloadUri.Host.Equals("update.rwfc.net", StringComparison.OrdinalIgnoreCase) ||
-                      downloadUri.Host.EndsWith(".update.rwfc.net", StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidDataException("The official Retro Rewind service returned an invalid download address.");
-
-                _status.Text = "Downloading Retro Rewind...";
-                _details.AppendText(_status.Text + Environment.NewLine);
-                using var response = await client.GetAsync(downloadUri, HttpCompletionOption.ResponseHeadersRead);
-                response.EnsureSuccessStatusCode();
-                var total = response.Content.Headers.ContentLength;
-                await using (var input = await response.Content.ReadAsStreamAsync())
-                await using (var output = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None))
-                {
-                    var buffer = new byte[1024 * 1024];
-                    long received = 0;
-                    int read;
-                    while ((read = await input.ReadAsync(buffer)) > 0)
-                    {
-                        await output.WriteAsync(buffer.AsMemory(0, read));
-                        received += read;
-                        if (total is > 0)
-                            _progress.Value = Math.Clamp(5 + (int)(received * 30 / total.Value), 5, 35);
-                    }
-                }
-
-                _status.Text = "Extracting Retro Rewind...";
-                _details.AppendText(_status.Text + Environment.NewLine);
-                _progress.Value = 36;
-                await Task.Run(() => ExtractArchiveSafely(archivePath, extractionPath));
-                var source = Path.Combine(extractionPath, "RetroRewind6");
-                if (!File.Exists(Path.Combine(source, "Binaries", "Code.pul")))
-                    throw new InvalidDataException("The official archive does not contain RetroRewind6\\Binaries\\Code.pul.");
-
-                var destination = Path.Combine(destinationParent, "RetroRewind6");
-                if (Directory.Exists(destination)) Directory.Delete(destination, recursive: true);
-                Directory.Move(source, destination);
-                _progress.Value = 40;
-                _details.AppendText("Retro Rewind is ready. Starting VR compilation..." + Environment.NewLine);
-                return destination;
-            }
-            finally
-            {
-                try
-                {
-                    if (Directory.Exists(temporaryRoot)) Directory.Delete(temporaryRoot, recursive: true);
-                }
-                catch
-                {
-                    // A temporary file held briefly by antivirus software is harmless and can be
-                    // removed later by Windows temporary-file cleanup.
-                }
-            }
-        }
-
-        private static void ExtractArchiveSafely(string archivePath, string destination)
-        {
-            var root = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            Directory.CreateDirectory(root);
-            using var archive = ZipFile.OpenRead(archivePath);
-            foreach (var entry in archive.Entries)
-            {
-                var outputPath = Path.GetFullPath(Path.Combine(root,
-                    entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
-                if (!outputPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("The Retro Rewind archive contains an unsafe path.");
-                if (string.IsNullOrEmpty(entry.Name))
-                {
-                    Directory.CreateDirectory(outputPath);
-                    continue;
-                }
-                Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-                entry.ExtractToFile(outputPath, overwrite: true);
-            }
         }
 
         private static string? LastUsefulLine(string text) => text.Split(new[] { '\r', '\n' },
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault();
     }
 }
+
+
