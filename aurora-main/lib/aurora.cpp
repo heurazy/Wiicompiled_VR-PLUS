@@ -614,6 +614,10 @@ struct StereoEyeTarget {
   // Built on demand for the desktop mirror only, and dropped with the rest of
   // the target when ensure_stereo_eye_target replaces the textures.
   wgpu::BindGroup copyBindGroup;
+  // Correct a GPU/runtime image inversion on the completed race eye, without
+  // changing view-anchored menus or the desktop mirror.
+  webgpu::TextureWithSampler orientedColor;
+  wgpu::BindGroup orientedCopyBindGroup;
   // Foveated rendering: a second view of `color` for the immersive eye passes,
   // which the patched Dawn binds to this eye's fragment density map
   // (webgpu/fdm.hpp), and what that map was built for.
@@ -921,13 +925,41 @@ std::optional<PendingStereoSink> run_stereo_sink(wgpu::CommandEncoder& encoder, 
       .logicalFrame = logicalFrame,
       .mode = mode,
   };
+  const int orientation = mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY ? webgpu::g_RaceOutputCopyMode : 0;
+  const bool correction = mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY && webgpu::g_RaceOutputNeedsCopy;
   for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
     const auto& output = g_stereoEyeTargets[eye].output();
+    const webgpu::TextureWithSampler* image = &output;
+    if (correction) {
+      auto& target = g_stereoEyeTargets[eye];
+      if (!target.orientedColor.texture || target.orientedColor.size.width != output.size.width ||
+          target.orientedColor.size.height != output.size.height || target.orientedColor.format != output.format) {
+        target.orientedColor = webgpu::create_render_texture(output.size.width, output.size.height, false);
+        target.orientedCopyBindGroup = {};
+      }
+      if (!target.orientedCopyBindGroup) target.orientedCopyBindGroup = webgpu::create_copy_bind_group(output);
+      const wgpu::RenderPassColorAttachment attachment{
+          .view = target.orientedColor.view,
+          .loadOp = wgpu::LoadOp::Clear,
+          .storeOp = wgpu::StoreOp::Store,
+      };
+      const wgpu::RenderPassDescriptor passDescriptor{
+          .label = "VR output orientation correction",
+          .colorAttachmentCount = 1,
+          .colorAttachments = &attachment,
+      };
+      auto pass = encoder.BeginRenderPass(&passDescriptor);
+      pass.SetPipeline(webgpu::g_OrientedCopyPipelines[orientation]);
+      pass.SetBindGroup(0, target.orientedCopyBindGroup);
+      pass.Draw(3);
+      pass.End();
+      image = &target.orientedColor;
+    }
     frame.eyes[eye] = {
-        .texture = &output.texture,
-        .view = &output.view,
-        .size = output.size,
-        .format = output.format,
+        .texture = &image->texture,
+        .view = &image->view,
+        .size = image->size,
+        .format = image->format,
     };
   }
   if (!registration.callback(encoder, frame, registration.userdata)) {
