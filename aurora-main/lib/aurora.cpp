@@ -765,11 +765,21 @@ std::optional<AuroraStereoFrame> request_stereo_frame(uint32_t logicalFrame, uin
   // A virtual-screen packet only copies the completed mono image and remains
   // a safe fallback across a transition. Immersive replay changes the GX
   // transforms, so it requires the exact tag latched for this sealed content.
-  if (frame.mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY &&
-      (contentTag == AURORA_STEREO_CONTENT_TAG_UNKNOWN || frame.contentTag != contentTag)) {
-    Log.debug("Stereo frame {} content tag does not match its sealed frame; rendering in mono", logicalFrame);
-    return std::nullopt;
-  }
+  // The provider's packet owns an acquired OpenXR image. Returning no packet
+  // after consuming it leaves that image pending until the 10-second timeout,
+  // blacking out the headset and delaying the next presentation mode. Finish
+  // the request with a mono copy instead; the next packet uses the new policy.
+    if (frame.mode == AURORA_STEREO_FRAME_IMMERSIVE_REPLAY &&
+        (contentTag == AURORA_STEREO_CONTENT_TAG_UNKNOWN || frame.contentTag != contentTag)) {
+     static uint32_t mismatchedFrames = 0;
+     ++mismatchedFrames;
+     if ((mismatchedFrames & (mismatchedFrames - 1)) == 0) {
+       Log.warn("Stereo content changed during submission; using mono copy: frame={}, count={}, packet-tag={}, sealed-tag={}",
+                logicalFrame, mismatchedFrames, frame.contentTag, contentTag);
+     }
+     frame.mode = AURORA_STEREO_FRAME_VIRTUAL_SCREEN;
+     frame.ui.anchored = false;
+    }
 
   const auto finite = [](const float* values, size_t count) {
     // aurora_core is built with -ffast-math, so std::isfinite may be folded to
