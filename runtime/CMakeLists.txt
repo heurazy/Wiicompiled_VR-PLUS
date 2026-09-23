@@ -1,4 +1,4 @@
-﻿cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 project(mkw_recompiled)
 
 if(NOT CMAKE_CXX_COMPILER_ID MATCHES "^(Clang|AppleClang)$" OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -461,6 +461,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(mkw_vr_policy_tests PRIVATE -ffast-math)
 endif()
 add_test(NAME mkw_vr_policy_tests COMMAND mkw_vr_policy_tests)
+
+# Bounded omnidirectional visibility while the HMD looks away from the kart.
+add_executable(mkw_vr_culling_tests tests/vr_culling_tests.cpp)
+target_include_directories(mkw_vr_culling_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
+target_compile_features(mkw_vr_culling_tests PRIVATE cxx_std_17)
+add_test(NAME mkw_vr_culling_tests COMMAND mkw_vr_culling_tests)
 
 # F10 > Diagnostics: the OpenXR frame-diagnostics collector is free of OpenXR
 # and guest state, so its window accounting runs on a synthetic clock here.
