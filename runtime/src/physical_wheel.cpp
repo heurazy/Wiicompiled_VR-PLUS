@@ -10,6 +10,7 @@
 #include "vr/openxr_integration.h"
 
 #include <SDL3/SDL_haptic.h>
+#include <SDL3/SDL_events.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_joystick.h>
 #include <SDL3/SDL_keyboard.h>
@@ -63,7 +64,8 @@ float deadzone = .02f, strength = .05f;
 std::string error;
 int learning = -1;
 std::vector<std::pair<SDL_JoystickID, int>> previousButtons;
-Clock::time_point scanned{}, rumbleTick{}, motorTime{}, settingsUntil{};
+Clock::time_point rumbleTick{}, motorTime{}, settingsUntil{};
+bool discoveryRequested = true, discoveryActive = false;
 bool motorOn = false;
 SDL_Haptic* haptic = nullptr;
 SDL_JoystickID hapticId = 0, attemptedHaptic = 0;
@@ -288,9 +290,29 @@ void PublishSnapshot(bool active, float steering) {
 
 void Poll() {
     if (!loaded) Load();
-    if (Clock::now() - scanned > std::chrono::seconds(1)) {
+    // SDL device enumeration may probe HID or Bluetooth drivers and stall a
+    // frame. Enumerate only while the wheel is enabled or its settings page is
+    // open; then refresh on hot-plug instead of rescanning every second.
+    const bool discover = enabled || Clock::now() < settingsUntil;
+    if (!discover) {
+        if (discoveryActive) {
+            CloseHaptic();
+            for (auto& device : devices) SDL_CloseJoystick(device.joystick);
+            devices.clear();
+        }
+        discoveryActive = false;
+        discoveryRequested = true;
+        ready = false;
+        armed = false;
+        inputFilter = {};
+        PublishSnapshot(false, 0);
+        return;
+    }
+    if (!discoveryActive) discoveryRequested = true;
+    discoveryActive = true;
+    if (discoveryRequested) {
         Scan();
-        scanned = Clock::now();
+        discoveryRequested = false;
     }
     // In VR the headset has the player's attention even when the desktop
     // window does not have the keyboard.
@@ -312,12 +334,19 @@ void Poll() {
     Feedback();
 }
 
+void HandleSdlEvent(const SDL_Event& event) {
+    if (event.type == SDL_EVENT_JOYSTICK_ADDED || event.type == SDL_EVENT_JOYSTICK_REMOVED)
+        discoveryRequested = true;
+}
+
 } // namespace hardware
 
 bool ReadPad(PADStatus& pad, bool blocked, bool race) {
     using namespace hardware;
     if (!loaded) Load();
     driving = race;
+    blocked = blocked || Clock::now() < settingsUntil;
+    Poll();
     if (!enabled) {
         // Nothing is opened or read until the wheel is turned on.
         armed = false;
@@ -325,8 +354,6 @@ bool ReadPad(PADStatus& pad, bool blocked, bool race) {
         PublishSnapshot(false, 0);
         return false;
     }
-    blocked = blocked || Clock::now() < settingsUntil;
-    Poll();
     if (!ready || !focused) {
         armed = false;
         StopFeedback();
@@ -382,6 +409,8 @@ void Shutdown() {
     CloseHaptic();
     for (auto& d : devices) SDL_CloseJoystick(d.joystick);
     devices.clear();
+    discoveryActive = false;
+    discoveryRequested = true;
     if (hapticSubsystem) SDL_QuitSubSystem(SDL_INIT_HAPTIC);
     hapticSubsystem = false;
     ready = false;
@@ -392,6 +421,7 @@ void DrawSettings() {
     using namespace hardware;
     settingsUntil = Clock::now() + std::chrono::milliseconds(200);
     Poll();
+    if (ImGui::Button("Refresh USB devices")) discoveryRequested = true;
     ImGui::TextWrapped("%s",
                        "USB steering wheel and pedals for player 1 (by heurazy). Calibrate each axis, then assign the "
                        "RIGHT paddle to drift and the LEFT paddle to items. Separate USB pedals and combined pedal axes "
@@ -526,5 +556,7 @@ void DrawSettings() {
                        "support varies.");
     if (!error.empty()) ImGui::TextWrapped("%s", error.c_str());
 }
+
+void HandleSdlEvent(const SDL_Event& event) { hardware::HandleSdlEvent(event); }
 
 } // namespace physical_wheel

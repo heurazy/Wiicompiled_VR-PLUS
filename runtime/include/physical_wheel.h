@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <dolphin/pad.h>
 
+union SDL_Event;
+
 namespace physical_wheel {
 
 // Endpoint calibration also handles reversed and combined pedal axes.
@@ -164,6 +166,7 @@ inline void Merge(PADStatus& pad, PADStatus wheel, bool race, bool blocked, PadF
 // overlay); the XR pacing thread reads a locked snapshot.
 bool ReadPad(PADStatus& pad, bool blocked, bool race);
 void DrawSettings();
+void HandleSdlEvent(const SDL_Event& event);
 // The calibrated steering, -1..1, while the wheel is driving a race.
 bool SteeringSnapshot(float& steering);
 // PADControlMotor for port 0; false when the wheel does not own it.

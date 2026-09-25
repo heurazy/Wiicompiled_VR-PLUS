@@ -1247,6 +1247,7 @@ void HandleEvents(const AuroraEvent* events) noexcept {
         if (ev->type != AURORA_SDL_EVENT) {
             continue;
         }
+        physical_wheel::HandleSdlEvent(ev->sdl);
         controller_mapping_wizard::HandleSdlEvent(ev->sdl);
         if (IsToggleKey(ev->sdl, SDL_SCANCODE_F10)) {
             if (g_vrEnabled) SetVrSettingsVisible(!g_vrSettingsVisible); else SetTopBarVisible(!g_topBarVisible);
