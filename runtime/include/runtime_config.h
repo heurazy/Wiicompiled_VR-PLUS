@@ -67,6 +67,8 @@ struct RuntimeUserConfig {
     std::optional<std::string> vrControllerMode;
     std::optional<uint32_t> vrFrameInterpolationFps;
     std::optional<bool> vrFirstPerson;
+    std::optional<bool> vrFirstPersonFollowVehicleMotion;
+    std::optional<int32_t> vrFirstPersonMotionLevel;
     std::optional<bool> vrFirstPersonToggleClick;
     std::optional<float> vrFirstPersonUnitsPerMeter;
     std::optional<float> vrFirstPersonHeadUpMeters;
@@ -202,6 +204,8 @@ inline constexpr float kVrFirstPersonUnitsPerMeterDefault = 50.0f;
 inline constexpr float kVrFirstPersonHeadUpDefault = 1.50f;
 inline constexpr float kVrFirstPersonHeadForwardDefault = 0.0f;
 inline constexpr float kVrFirstPersonHeadRightDefault = 0.0f;
+inline constexpr bool kVrFirstPersonFollowVehicleMotionDefault = true;
+inline constexpr int32_t kVrFirstPersonMotionLevelDefault = 4; // Safe
 inline constexpr bool kVrFirstPersonHideDriverDefault = true;
 inline constexpr int32_t kVrFirstPersonHiddenModelDefault = 0;
 inline constexpr float kVrFirstPersonHeadOffsetLimit = 10.0f;
@@ -551,6 +555,8 @@ inline void EnsureConfigFile() {
               "# the character's height, so the wheel is within reach.\n"
               "# \"custom\" uses the world scale and head offsets below instead.\n"
               "first_person_seat = \"cockpit\"\n"
+              "first_person_follow_vehicle_motion = true\n"
+              "first_person_motion_level = 4\n"
               "cockpit_units_per_meter = 100.0\n"
               "# The custom seat's world scale, replacing world_units_per_meter\n"
               "# while first person is engaged; the 500 above makes the race a\n"
@@ -790,6 +796,12 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.vrSkipCopyClears = FindConfigValue<bool>(document, "vr", "skip_copy_clears");
     config.vrSinglePassEyes = FindConfigValue<bool>(document, "vr", "single_pass_eyes");
     config.vrFirstPerson = FindConfigValue<bool>(document, "vr", "first_person");
+    config.vrFirstPersonFollowVehicleMotion =
+        FindConfigValue<bool>(document, "vr", "first_person_follow_vehicle_motion");
+    if (auto level = FindConfigInt(document, "vr", "first_person_motion_level");
+        level && *level >= 1 && *level <= 4) {
+        config.vrFirstPersonMotionLevel = static_cast<int32_t>(*level);
+    }
     config.vrFirstPersonToggleClick = FindConfigValue<bool>(document, "vr", "first_person_toggle_click");
     if (auto value = FindConfigFloat(document, "vr", "first_person_units_per_meter");
         value && *value >= 1.0f && *value <= 10000.0f) {
@@ -1137,6 +1149,17 @@ inline bool SetVrSinglePassEyes(bool value) {
 inline bool SetVrFirstPerson(bool value) {
     Mutable().vrFirstPerson = value;
     return WriteSetting("vr", "first_person", value ? "true" : "false");
+}
+
+inline bool SetVrFirstPersonFollowVehicleMotion(bool value) {
+    Mutable().vrFirstPersonFollowVehicleMotion = value;
+    return WriteSetting("vr", "first_person_follow_vehicle_motion", value ? "true" : "false");
+}
+
+inline bool SetVrFirstPersonMotionLevel(int32_t value) {
+    value = std::clamp(value, 1, 4);
+    Mutable().vrFirstPersonMotionLevel = value;
+    return WriteSetting("vr", "first_person_motion_level", std::to_string(value));
 }
 
 inline bool SetVrFirstPersonToggleClick(bool value) {
@@ -1644,6 +1667,16 @@ inline bool VrSinglePassEyes(bool fallback = true) {
 
 inline bool VrFirstPerson(bool fallback = false) {
     return Get().vrFirstPerson.value_or(fallback);
+}
+
+inline bool VrFirstPersonFollowVehicleMotion(
+    bool fallback = kVrFirstPersonFollowVehicleMotionDefault) {
+    return Get().vrFirstPersonFollowVehicleMotion.value_or(fallback);
+}
+
+inline int32_t VrFirstPersonMotionLevel(
+    int32_t fallback = kVrFirstPersonMotionLevelDefault) {
+    return std::clamp(Get().vrFirstPersonMotionLevel.value_or(fallback), 1, 4);
 }
 
 inline bool VrFirstPersonToggleClick(bool fallback = true) {

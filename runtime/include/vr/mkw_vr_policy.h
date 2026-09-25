@@ -114,6 +114,7 @@ struct MkwVRPolicySnapshot {
     MkwVRCameraObservation camera{};
     uint32_t available_bindings = MkwVRBindingNone;
     bool session_active = false;
+    bool settings_visible = false;
     // A first-person camera is actually driving the view this frame. Set by the
     // integration layer once the anchor it publishes to the renderer is valid,
     // so the world scale can never disagree with where the camera is.
@@ -144,6 +145,7 @@ struct MkwVRPolicySnapshot {
 void MkwVRPolicyReset() noexcept;
 void MkwVRPolicyConfigure(const MkwVRPolicyConfig& config) noexcept;
 void MkwVRPolicySetSessionActive(bool active) noexcept;
+void MkwVRPolicySetSettingsVisible(bool visible) noexcept;
 void MkwVRPolicySetAvailableBindings(uint32_t bindings) noexcept;
 void MkwVRPolicyPublishScene(const MkwVRSceneObservation& scene) noexcept;
 void MkwVRPolicyPublishRaceCamera(const MkwVRCameraObservation& camera) noexcept;

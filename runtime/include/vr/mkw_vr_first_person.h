@@ -16,6 +16,13 @@ namespace mkw::vr {
 // as Aurora's Mat3x4: a point is transformed as out = M * (p, 1).
 using Mtx34 = std::array<float, 12>;
 
+enum class FirstPersonMotionLevel : uint8_t {
+    Tilt = 1,
+    TiltAndLateral = 2,
+    Full = 3,
+    Safe = 4,
+};
+
 inline constexpr Mtx34 kIdentityMtx34{
     1.0f, 0.0f, 0.0f, 0.0f, //
     0.0f, 1.0f, 0.0f, 0.0f, //
@@ -487,6 +494,125 @@ inline bool ComputeFirstPersonAnchor(const Mtx34& view_from_world, const Mtx34& 
     return true;
 }
 
+// Comfort motion follows sustained pitch and bank while keeping the simulation
+// heading. Full motion follows the rendered chassis, including item hits and tricks.
+inline bool ComposeFirstPersonMotionPose(const Mtx34& stable, const Mtx34& physics,
+                                          const Mtx34* visual, FirstPersonMotionLevel level,
+                                          bool animated_event, float max_lateral_units,
+                                          Mtx34& out) noexcept {
+    using namespace detail;
+    if (!IsFiniteMtx34(stable)) return false;
+    if (level == FirstPersonMotionLevel::Full) {
+        if (!visual || !IsFiniteMtx34(*visual)) return false;
+        out = *visual;
+        return true;
+    }
+    if (animated_event) { out = stable; return true; }
+    if (!IsFiniteMtx34(physics)) return false;
+    Vec3 forward{stable[2], 0, stable[10]};
+    Vec3 physical_forward{physics[2], physics[6], physics[10]};
+    Vec3 physical_up{physics[1], physics[5], physics[9]};
+    if (!Normalize(forward) || !Normalize(physical_forward) || !Normalize(physical_up) ||
+        std::abs(Dot(physical_forward, physical_up)) > 0.95f) return false;
+    const Vec3 world_up{0, 1, 0};
+    Vec3 right = Cross(world_up, forward);
+    if (!Normalize(right)) return false;
+    const float pitch = std::asin(std::clamp(physical_forward.y, -1.0f, 1.0f));
+    const float cp = std::cos(pitch), sp = std::sin(pitch);
+    const Vec3 pitched_forward{forward.x * cp, sp, forward.z * cp};
+    const Vec3 pitched_up{-forward.x * sp, cp, -forward.z * sp};
+    const float roll = std::atan2(-Dot(physical_up, right), Dot(physical_up, pitched_up));
+    const float cr = std::cos(roll), sr = std::sin(roll);
+    const Vec3 tilted_right{right.x * cr + pitched_up.x * sr,
+                            right.y * cr + pitched_up.y * sr,
+                            right.z * cr + pitched_up.z * sr};
+    const Vec3 tilted_up{pitched_up.x * cr - right.x * sr,
+                         pitched_up.y * cr - right.y * sr,
+                         pitched_up.z * cr - right.z * sr};
+    Mtx34 result = stable;
+    result[0] = tilted_right.x; result[1] = tilted_up.x; result[2] = pitched_forward.x;
+    result[4] = tilted_right.y; result[5] = tilted_up.y; result[6] = pitched_forward.y;
+    result[8] = tilted_right.z; result[9] = tilted_up.z; result[10] = pitched_forward.z;
+    if (level == FirstPersonMotionLevel::TiltAndLateral && visual &&
+        IsFiniteMtx34(*visual) && IsFiniteFloat(&max_lateral_units) && max_lateral_units > 0) {
+        const Vec3 delta{(*visual)[3] - stable[3], (*visual)[7] - stable[7],
+                         (*visual)[11] - stable[11]};
+        const float side = std::clamp(Dot(delta, right), -max_lateral_units, max_lateral_units);
+        result[3] += right.x * side;
+        result[7] += right.y * side;
+        result[11] += right.z * side;
+    }
+    if (!IsFiniteMtx34(result)) return false;
+    out = result;
+    return true;
+}
+
+class SafeTiltFilter {
+public:
+    void Reset() noexcept { pitch_ = {}; roll_ = {}; }
+
+    bool Update(const Mtx34& stable, const Mtx34& physics, bool animated_event,
+                float dt, Mtx34& out) noexcept {
+        using namespace detail;
+        Mtx34 raw{};
+        if (!ComposeFirstPersonMotionPose(stable, physics, nullptr,
+                                          FirstPersonMotionLevel::Tilt, animated_event, 0, raw)) {
+            Reset();
+            return false;
+        }
+        if (!IsFiniteFloat(&dt) || dt <= 0) dt = 1.0f / 60.0f;
+        dt = std::min(dt, 0.05f);
+        const float raw_pitch = std::asin(std::clamp(raw[6], -1.0f, 1.0f));
+        const float raw_roll = std::atan2(raw[4], raw[5]);
+        const float pitch = Advance(pitch_, raw_pitch, dt);
+        const float roll = Advance(roll_, raw_roll, dt);
+
+        Vec3 forward{stable[2], 0, stable[10]};
+        if (!Normalize(forward)) { Reset(); return false; }
+        const Vec3 world_up{0, 1, 0};
+        Vec3 right = Cross(world_up, forward);
+        if (!Normalize(right)) { Reset(); return false; }
+        const float cp = std::cos(pitch), sp = std::sin(pitch);
+        const float cr = std::cos(roll), sr = std::sin(roll);
+        const Vec3 pitched_forward{forward.x * cp, sp, forward.z * cp};
+        const Vec3 pitched_up{-forward.x * sp, cp, -forward.z * sp};
+        const Vec3 tilted_right{right.x * cr + pitched_up.x * sr,
+                                right.y * cr + pitched_up.y * sr,
+                                right.z * cr + pitched_up.z * sr};
+        const Vec3 tilted_up{pitched_up.x * cr - right.x * sr,
+                             pitched_up.y * cr - right.y * sr,
+                             pitched_up.z * cr - right.z * sr};
+        out = stable;
+        out[0] = tilted_right.x; out[1] = tilted_up.x; out[2] = pitched_forward.x;
+        out[4] = tilted_right.y; out[5] = tilted_up.y; out[6] = pitched_forward.y;
+        out[8] = tilted_right.z; out[9] = tilted_up.z; out[10] = pitched_forward.z;
+        return IsFiniteMtx34(out);
+    }
+
+private:
+    struct Axis { float angle = 0, pending = 0; bool active = false; };
+    Axis pitch_{}, roll_{};
+
+    static float Advance(Axis& axis, float raw, float dt) noexcept {
+        constexpr float kEnter = 14.0f * 3.141592654f / 180.0f;
+        constexpr float kExit = 8.0f * 3.141592654f / 180.0f;
+        constexpr float kMaximum = 25.0f * 3.141592654f / 180.0f;
+        constexpr float kMaxSpeed = 45.0f * 3.141592654f / 180.0f;
+        if (std::abs(raw) <= kExit) { axis.active = false; axis.pending = 0; }
+        else if (!axis.active) {
+            if (std::abs(raw) >= kEnter) axis.pending += dt;
+            else axis.pending = 0;
+            if (axis.pending >= 0.18f) axis.active = true;
+        }
+        const float target = axis.active ? std::clamp(raw, -kMaximum, kMaximum) : 0.0f;
+        const float blend = 1.0f - std::exp(-dt / 0.55f);
+        axis.angle += std::clamp((target - axis.angle) * blend, -kMaxSpeed * dt,
+                                 kMaxSpeed * dt);
+        if (!axis.active && std::abs(axis.angle) < 0.00001f) axis.angle = 0;
+        return axis.angle;
+    }
+};
+
 // ---------------------------------------------------------------------------
 // Per-frame observation. Called from the translated-code observers on the guest
 // thread; the anchor is consumed by the producer at its Aurora frame seal.
@@ -511,6 +637,8 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept;
 // only latches; the anchor itself is computed by Commit below, because the
 // scene's camera matrix for the frame is not set until the draws run.
 void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_address) noexcept;
+// Original race-camera eye for depth-placing opponent name labels.
+bool MkwVRFirstPersonGetRaceCameraPosition(float out[3]) noexcept;
 
 // Computes and publishes the anchor from the values the frame was drawn with.
 // Call from the producer's frame seal, after the draws and before the sealed

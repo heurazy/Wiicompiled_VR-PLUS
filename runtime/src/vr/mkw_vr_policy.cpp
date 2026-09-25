@@ -18,6 +18,7 @@ struct PolicyState {
     MkwVRCameraObservation camera{};
     uint32_t available_bindings = MkwVRBindingNone;
     bool session_active = false;
+    bool settings_visible = false;
     bool first_person_engaged = false;
     uint64_t safety_generation = 1;
 };
@@ -92,7 +93,7 @@ VRPresentationMode SelectPresentation(const PolicyState& state) noexcept {
     // incomplete instrumentation. It preserves the unmodified render path.
     if ((state.available_bindings & kMkwVRRequiredImmersiveBindings) !=
         kMkwVRRequiredImmersiveBindings ||
-        !state.config.immersive_races || state.scene.mode != VRSceneMode::Race ||
+        state.settings_visible || !state.config.immersive_races || state.scene.mode != VRSceneMode::Race ||
         (state.scene.local_player_count < 1 || state.scene.local_player_count > 4) ||
         !IsFiniteCamera(state.camera) ||
         !ObservationsAreCoherent(state.scene, state.camera)) {
@@ -113,7 +114,7 @@ VRPresentationMode SelectStablePresentation(const PolicyState& state) noexcept {
     // without advancing the generation twice on every healthy race frame.
     if ((state.available_bindings & kMkwVRRequiredImmersiveBindings) !=
             kMkwVRRequiredImmersiveBindings ||
-        !state.config.immersive_races || state.scene.mode != VRSceneMode::Race ||
+        state.settings_visible || !state.config.immersive_races || state.scene.mode != VRSceneMode::Race ||
         (state.scene.local_player_count < 1 || state.scene.local_player_count > 4) ||
         !IsFiniteCamera(state.camera)) {
         return VRPresentationMode::VirtualScreen;
@@ -215,6 +216,11 @@ void MkwVRPolicySetSessionActive(bool active) noexcept {
     ApplyPolicyMutation([&] { g_policy.session_active = active; });
 }
 
+void MkwVRPolicySetSettingsVisible(bool visible) noexcept {
+    std::lock_guard<std::mutex> lock(g_policy_mutex);
+    ApplyPolicyMutation([&] { g_policy.settings_visible = visible; });
+}
+
 void MkwVRPolicySetAvailableBindings(uint32_t bindings) noexcept {
     std::lock_guard<std::mutex> lock(g_policy_mutex);
     ApplyPolicyMutation([&] { g_policy.available_bindings = bindings; });
@@ -280,6 +286,7 @@ MkwVRPolicySnapshot MkwVRPolicyGetSnapshot() noexcept {
     snapshot.camera = g_policy.camera;
     snapshot.available_bindings = g_policy.available_bindings;
     snapshot.session_active = g_policy.session_active;
+    snapshot.settings_visible = g_policy.settings_visible;
     snapshot.first_person_engaged =
         g_policy.first_person_engaged && snapshot.presentation == VRPresentationMode::ImmersiveRace;
     snapshot.safety_generation = g_policy.safety_generation;

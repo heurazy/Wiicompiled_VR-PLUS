@@ -198,6 +198,13 @@ struct HudNdcRemap {
   float offsetY = 0.0f;
 };
 
+struct HudOverlayPlacement {
+  float anchorX = 0.0f;
+  float anchorY = 0.0f;
+  float scale = 1.0f;
+  float liftNdc = 0.0f;
+};
+
 inline HudNdcRemap make_hud_ndc_remap(float viewportLeft, float viewportTop, float viewportWidth, float viewportHeight,
                                       float frameLeft, float frameTop, float frameWidth, float frameHeight) noexcept {
   if (!(frameWidth > 0.0f) || !(frameHeight > 0.0f)) {
@@ -270,16 +277,26 @@ inline Vec4<float> backend_ndc_depth_row(const Mat4x4<float>& projection) noexce
 // equal-depth 2D layers deterministic under head rotation and translation.
 inline Mat4x4<float> compose_hud_screen_projection(const Mat4x4<float>& eyeFrustum, const Mat3x4<float>& viewFromCenter,
                                                    const HudScreen& screen, const Mat4x4<float>& gameProjection,
-                                                   const HudNdcRemap& ndcRemap = {}) noexcept {
+                                                   const HudNdcRemap& ndcRemap = {},
+                                                   const HudOverlayPlacement& placement = {}) noexcept {
   const Mat4x4<float> frameProjection = remap_hud_ndc(gameProjection, ndcRemap);
   // The screen point's three coordinates, each as a functional of (mv_pos, 1).
   Mat3x4<float> screenPoint{};
   for (size_t i = 0; i < 4; ++i) {
-    screenPoint.m0[i] = frameProjection.m0[i] * screen.halfWidth;
-    screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight;
+    screenPoint.m0[i] = frameProjection.m0[i] * screen.halfWidth * placement.scale;
+    screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight * placement.scale;
     screenPoint.m2[i] = 0.0f;
   }
   screenPoint.m2[3] = -screen.distance;
+  // Scale an opponent's label around its own on-screen anchor so its location
+  // remains above the kart when the plane moves to that kart's world depth.
+  const float anchorNdcX = frameProjection.m0[0] * placement.anchorX +
+                           frameProjection.m0[1] * placement.anchorY + frameProjection.m0[3];
+  const float anchorNdcY = frameProjection.m1[0] * placement.anchorX +
+                           frameProjection.m1[1] * placement.anchorY + frameProjection.m1[3];
+  screenPoint.m0[3] += anchorNdcX * screen.halfWidth * (1.0f - placement.scale);
+  screenPoint.m1[3] += (anchorNdcY * (1.0f - placement.scale) +
+                        placement.liftNdc) * screen.halfHeight;
 
   // The same functionals carried into eye view space. viewFromCenter's own
   // translation column joins the constant term, the one place the implicit 1 of

@@ -250,6 +250,9 @@ uint32_t get_stereo_foveation() noexcept { return g_stereoFoveation.load(std::me
 static std::atomic_bool g_stereoHudScreenEnabled{false};
 static std::atomic<float> g_stereoHudScreenWidth{0.f};
 static std::atomic<float> g_stereoHudScreenDistance{0.f};
+static std::atomic<float> g_stereoHudWorldDepth{0.f};
+static std::atomic<float> g_stereoHudWorldAnchorX{0.f};
+static std::atomic<float> g_stereoHudWorldAnchorY{0.f};
 
 void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept {
   g_stereoHudScreenWidth.store(width, std::memory_order_relaxed);
@@ -257,6 +260,21 @@ void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept {
   g_stereoHudScreenEnabled.store(enabled, std::memory_order_relaxed);
 }
 bool get_stereo_hud_screen_enabled() noexcept { return g_stereoHudScreenEnabled.load(std::memory_order_relaxed); }
+void set_stereo_hud_world_depth(float distance) noexcept {
+  g_stereoHudWorldDepth.store(std::isfinite(distance) && distance > 0.f ? distance : 0.f,
+                              std::memory_order_relaxed);
+}
+float get_stereo_hud_world_depth() noexcept {
+  return g_stereoHudWorldDepth.load(std::memory_order_relaxed);
+}
+void set_stereo_hud_world_anchor(float x, float y) noexcept {
+  g_stereoHudWorldAnchorX.store(std::isfinite(x) ? x : 0.f, std::memory_order_relaxed);
+  g_stereoHudWorldAnchorY.store(std::isfinite(y) ? y : 0.f, std::memory_order_relaxed);
+}
+std::pair<float, float> get_stereo_hud_world_anchor() noexcept {
+  return {g_stereoHudWorldAnchorX.load(std::memory_order_relaxed),
+          g_stereoHudWorldAnchorY.load(std::memory_order_relaxed)};
+}
 void get_stereo_hud_screen_size(float& width, float& distance) noexcept {
   width = g_stereoHudScreenWidth.load(std::memory_order_relaxed);
   distance = g_stereoHudScreenDistance.load(std::memory_order_relaxed);
@@ -1408,8 +1426,22 @@ static void write_stereo_uniform(std::span<uint8_t> uniform, const gx::UniformRe
         drawViewport.left, drawViewport.top, drawViewport.width, drawViewport.height,
         static_cast<float>(displayRegion.x), static_cast<float>(displayRegion.y),
         static_cast<float>(displayRegion.width), static_cast<float>(displayRegion.height));
-    const auto projection = stereo_replay::compose_hud_screen_projection(eye.projection, eye.viewFromCenter, hudScreen,
-                                                                         gameProjection, ndcRemap);
+    auto screen = hudScreen;
+    const bool worldNameBalloon = layout.worldHudDepth > 0.f && screen.valid();
+    if (worldNameBalloon) {
+      const float depth = std::clamp(layout.worldHudDepth, screen.distance * 0.5f,
+                                     screen.distance * 20.f);
+      const float scale = depth / screen.distance;
+      screen.halfWidth *= scale;
+      screen.halfHeight *= scale;
+      screen.distance = depth;
+    }
+    const stereo_replay::HudOverlayPlacement placement = worldNameBalloon
+        ? stereo_replay::HudOverlayPlacement{layout.worldHudAnchorX, layout.worldHudAnchorY, 0.55f, 0.07f}
+        : stereo_replay::HudOverlayPlacement{};
+    const auto projection = stereo_replay::compose_hud_screen_projection(
+        eye.projection, worldNameBalloon ? eye.viewFromScene : eye.viewFromCenter,
+        screen, gameProjection, ndcRemap, placement);
     std::memcpy(uniform.data() + layout.projectionOffset, &projection, sizeof(projection));
   }
 

@@ -777,8 +777,7 @@ std::optional<AuroraStereoFrame> request_stereo_frame(uint32_t logicalFrame, uin
        Log.warn("Stereo content changed during submission; using mono copy: frame={}, count={}, packet-tag={}, sealed-tag={}",
                 logicalFrame, mismatchedFrames, frame.contentTag, contentTag);
      }
-     frame.mode = AURORA_STEREO_FRAME_VIRTUAL_SCREEN;
-     frame.ui.anchored = false;
+      frame.mode = AURORA_STEREO_FRAME_VIRTUAL_SCREEN;
     }
 
   const auto finite = [](const float* values, size_t count) {
@@ -2989,6 +2988,22 @@ uint32_t aurora_get_stereo_foveation() { return aurora::gfx::get_stereo_foveatio
 bool aurora_stereo_foveation_available() { return aurora::webgpu::fdm::available(); }
 void aurora_set_stereo_hud_screen(bool enabled, float width, float distance) {
   aurora::gfx::set_stereo_hud_screen(enabled, width, distance);
+}
+void aurora_set_stereo_hud_world_depth(float distance) {
+  distance = std::isfinite(distance) && distance > 0.f ? distance : 0.f;
+  if (aurora::gfx::get_stereo_hud_world_depth() == distance) return;
+  aurora::gx::fifo::drain();
+  aurora::gfx::set_stereo_hud_world_depth(distance);
+  aurora::gx::g_gxState.stateDirty = true;
+}
+void aurora_set_stereo_hud_world_anchor(float x, float y) {
+  x = std::isfinite(x) ? x : 0.f;
+  y = std::isfinite(y) ? y : 0.f;
+  const auto old = aurora::gfx::get_stereo_hud_world_anchor();
+  if (old.first == x && old.second == y) return;
+  aurora::gx::fifo::drain();
+  aurora::gfx::set_stereo_hud_world_anchor(x, y);
+  aurora::gx::g_gxState.stateDirty = true;
 }
 bool aurora_get_stereo_hud_screen_enabled() { return aurora::gfx::get_stereo_hud_screen_enabled(); }
 bool aurora_get_stereo_screen_aspects(float* pictureAspect, float* snapshotAspect) {

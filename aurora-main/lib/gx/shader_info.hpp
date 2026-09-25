@@ -18,6 +18,9 @@ struct UniformReplayLayout {
   // rest of the native post-processing chain. It belongs to the rendered image,
   // not to the game's 2D layer, so it must stay where the game aimed it.
   bool nativeEfbEffect = false;
+  float worldHudDepth = 0.0f;
+  float worldHudAnchorX = 0.0f;
+  float worldHudAnchorY = 0.0f;
 };
 
 struct UniformRanges {

@@ -304,6 +304,58 @@ void TestYawOnlyIgnoresKartRoll() {
     CheckNear(rolled[5], 1.0f, "yaw-only keeps the horizon level");
 }
 
+void TestVehicleMotionLevels() {
+    using mkw::vr::ComposeFirstPersonMotionPose;
+    using mkw::vr::FirstPersonMotionLevel;
+    const Mtx34 stable = KartAt(10, 20, 30);
+    const float angle = 0.3f, c = std::cos(angle), s = std::sin(angle);
+    const Mtx34 physics{c, -s, 0, 10, s, c, 0, 20, 0, 0, 1, 30};
+    const Mtx34 visual{-1, 0, 0, 40, 0, 1, 0, 20, 0, 0, -1, 30};
+    Mtx34 pose{};
+    Check(ComposeFirstPersonMotionPose(stable, physics, &visual, FirstPersonMotionLevel::Tilt,
+                                        false, 75, pose), "tilt pose is available");
+    CheckNear(pose[4], s, "tilt follows physical bank");
+    CheckNear(pose[3], 10, "tilt ignores lateral animation");
+    Check(ComposeFirstPersonMotionPose(stable, physics, &visual,
+                                        FirstPersonMotionLevel::TiltAndLateral, false, 75, pose),
+          "tilt and lateral pose is available");
+    CheckNear(pose[3], 40, "lateral mode follows sideways motion");
+    Check(ComposeFirstPersonMotionPose(stable, physics, &visual,
+                                        FirstPersonMotionLevel::TiltAndLateral, true, 75, pose),
+          "damage uses stable comfort pose");
+    CheckNear(pose[3], 10, "damage does not fling comfort camera");
+    Check(ComposeFirstPersonMotionPose(stable, physics, &visual, FirstPersonMotionLevel::Full,
+                                        true, 75, pose), "full mode follows visual pose");
+    for (size_t i = 0; i < pose.size(); ++i)
+        CheckNear(pose[i], visual[i], "full mode follows all animation axes");
+}
+
+void TestSafeMotionFilter() {
+    using mkw::vr::SafeTiltFilter;
+    const Mtx34 stable = KartAt(10, 20, 30);
+    auto pitched = [&](float angle) {
+        Mtx34 pose = stable;
+        pose[5] = std::cos(angle); pose[6] = std::sin(angle);
+        pose[9] = -std::sin(angle); pose[10] = std::cos(angle);
+        return pose;
+    };
+    SafeTiltFilter filter;
+    Mtx34 result{};
+    for (int frame = 0; frame < 120; ++frame)
+        Check(filter.Update(stable, pitched(0.10f), false, 1.0f / 60.0f, result),
+              "safe filter accepts small slope");
+    CheckNear(result[6], 0, "safe ignores small slopes");
+    for (int frame = 0; frame < 8; ++frame)
+        filter.Update(stable, pitched(0.35f), false, 1.0f / 60.0f, result);
+    CheckNear(result[6], 0, "safe ignores short bumps");
+    for (int frame = 0; frame < 60; ++frame)
+        filter.Update(stable, pitched(0.35f), false, 1.0f / 60.0f, result);
+    Check(result[6] > 0.08f && result[6] < std::sin(0.35f),
+          "safe eases into sustained slope");
+    filter.Update(stable, pitched(0), true, 1.0f / 60.0f, result);
+    Check(result[6] > 0, "impact returns view smoothly");
+}
+
 } // namespace
 
 int main() {
@@ -314,6 +366,8 @@ int main() {
     TestFullRotationFollowsTheKart();
     TestYawPitchKeepsClimbAndDropsRoll();
     TestYawOnlyIgnoresKartRoll();
+    TestVehicleMotionLevels();
+    TestSafeMotionFilter();
     TestNonFiniteInputIsRejected();
     TestDegenerateKartPoseIsRejected();
     if (g_failures != 0) {

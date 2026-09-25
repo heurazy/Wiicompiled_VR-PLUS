@@ -186,6 +186,15 @@ bool ReadGuestPointer(uint32_t address, uint32_t& out) noexcept {
     return Memory::TryRead32(address, out) && out != 0;
 }
 
+bool IsTrickAnimating(uint32_t movement) noexcept {
+    // Trick::Start sets this flag through Movement+0x258; comfort modes exclude
+    // the resulting 360-degree chassis animation from the seat orientation.
+    uint32_t trick = 0, owner = 0, state = 0, flags = 0;
+    return movement && ReadGuestPointer(movement + 0x258, trick) &&
+           ReadGuestPointer(trick, owner) && ReadGuestPointer(owner + 4, state) &&
+           Memory::TryRead32(state + 8, flags) && (flags & 0x400000u) != 0;
+}
+
 constexpr uint32_t kMtx34Bytes = 12u * sizeof(float);
 
 bool ReadGuestMtx34(uint32_t address, Mtx34& out) noexcept {
@@ -304,6 +313,8 @@ struct FirstPersonState {
     FirstPersonRotation rotation = FirstPersonRotation::YawOnly;
 
     uint32_t camera_address = 0;
+    std::array<float, 3> race_camera_world{};
+    bool race_camera_world_valid = false;
     detail::LocalPlayerKartRead player_kart{};
     // Armed by the draw boundary, consumed by the frame seal.
     bool armed = false;
@@ -324,6 +335,8 @@ struct FirstPersonState {
     float cockpit_units_per_meter = RuntimeConfigFile::kVrCockpitUnitsPerMeterDefault;
     bool steering_wheel = RuntimeConfigFile::kVrSteeringWheelDefault;
     bool native_steering_wheel = RuntimeConfigFile::kVrNativeSteeringWheelDefault;
+    bool follow_vehicle_motion = RuntimeConfigFile::kVrFirstPersonFollowVehicleMotionDefault;
+    FirstPersonMotionLevel motion_level = FirstPersonMotionLevel::Safe;
     // Read at the race draw boundary, consumed at the seal.
     struct CockpitLatch {
         bool valid = false;
@@ -350,6 +363,7 @@ struct FirstPersonState {
         bool waiting_for_driving = false;
     } cockpit;
     CockpitStabilizer stabilizer{};
+    SafeTiltFilter safe_tilt{};
     uint64_t stabilized_frame = 0;
     SeatedEyeReference seated_eye{};
     uint32_t seated_driver = 0;
@@ -848,10 +862,11 @@ void LatchCockpitLocked(uint64_t guest_frame_index) noexcept {
     }
     Mtx34 simulation = pose;
     uint32_t damage_type = UINT32_MAX;
+    uint32_t movement = 0;
     try {
         // The simulation's position and driving direction, never the animated
         // vehicle matrix: damage and tricks spin the chassis, not the seat.
-        uint32_t dynamics = 0, movement = 0, damage = 0;
+        uint32_t dynamics = 0, damage = 0;
         if (ReadGuestPointer(kart.physics + kKartPhysicsDynamicsOffset, dynamics) &&
             Memory::Contains(dynamics + kDynamicsPositionOffset, 12)) {
             for (uint32_t row = 0; row < 3; ++row) {
@@ -883,12 +898,23 @@ void LatchCockpitLocked(uint64_t guest_frame_index) noexcept {
     g_state.stabilized_frame = guest_frame_index;
     latch.stable_body = g_state.stabilizer.Update(simulation, damage_type != UINT32_MAX, dt);
     latch.seat_body = latch.stable_body;
-    if (g_state.rotation != FirstPersonRotation::YawOnly) {
+    if (g_state.follow_vehicle_motion) {
+        const bool animated_event = damage_type != UINT32_MAX || IsTrickAnimating(movement);
+        Mtx34 motion_pose{};
+        const bool ready = g_state.motion_level == FirstPersonMotionLevel::Safe
+            ? g_state.safe_tilt.Update(latch.stable_body, pose, animated_event, dt, motion_pose)
+            : ComposeFirstPersonMotionPose(latch.stable_body, pose, &latch.body_pose,
+                                            g_state.motion_level, animated_event,
+                                            g_state.cockpit_units_per_meter * 0.75f, motion_pose);
+        if (g_state.motion_level != FirstPersonMotionLevel::Safe) g_state.safe_tilt.Reset();
+        if (ready) latch.seat_body = motion_pose;
+    } else if (g_state.rotation != FirstPersonRotation::YawOnly) {
         latch.seat_body = pose;
         latch.seat_body[3] = latch.stable_body[3];
         latch.seat_body[7] = latch.stable_body[7];
         latch.seat_body[11] = latch.stable_body[11];
     }
+    if (!g_state.follow_vehicle_motion) g_state.safe_tilt.Reset();
     latch.player_scale = ReadPlayerScale(kart.accessor);
     latch.body = kart.body;
     latch.grips_valid = ReadGuestMtx34(kart.body + kKartBodyLeftGripOffset, latch.left_grip) &&
@@ -1021,6 +1047,7 @@ bool ComputeCockpitAnchorLocked(const Mtx34& view_from_world, const KartPoseRead
     // kart's orientation around the same seat (LatchCockpitLocked).
     (void)pose;
     const FirstPersonRotation rotation =
+        g_state.follow_vehicle_motion ? FirstPersonRotation::Full :
         g_state.rotation == FirstPersonRotation::YawOnly ? FirstPersonRotation::YawPitch : g_state.rotation;
     Mtx34 anchor{};
     if (!ComputeFirstPersonAnchor(view_from_world, latch.seat_body, eye[0], eye[1], eye[2], rotation, anchor)) {
@@ -1236,6 +1263,13 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
         g_state.cockpit_units_per_meter = cockpit_units;
         g_state.steering_wheel = RuntimeConfigFile::VrSteeringWheel();
         g_state.native_steering_wheel = RuntimeConfigFile::VrNativeSteeringWheel();
+        const bool follow_motion = RuntimeConfigFile::VrFirstPersonFollowVehicleMotion();
+        const auto motion_level = static_cast<FirstPersonMotionLevel>(
+            RuntimeConfigFile::VrFirstPersonMotionLevel());
+        if (follow_motion != g_state.follow_vehicle_motion || motion_level != g_state.motion_level)
+            g_state.safe_tilt.Reset();
+        g_state.follow_vehicle_motion = follow_motion;
+        g_state.motion_level = motion_level;
         g_state.native_wheel_fallback = false;
         g_state.native_wheel_unmatched = 0;
     }
@@ -1255,6 +1289,7 @@ void MkwVRFirstPersonReset() noexcept {
     g_state.armed = false;
     g_state.armed_view_valid = false;
     g_state.camera_address = 0;
+    g_state.race_camera_world_valid = false;
     g_state.player_kart = {};
     g_state.anchor = {};
     g_state.hold_frames = 0;
@@ -1264,6 +1299,7 @@ void MkwVRFirstPersonReset() noexcept {
     DropNativeWheelLocked();
     g_state.cockpit = {};
     g_state.stabilizer = {};
+    g_state.safe_tilt.Reset();
     g_state.stabilized_frame = 0;
     g_state.seated_eye = {};
     g_state.seated_driver = 0;
@@ -1277,6 +1313,17 @@ void MkwVRFirstPersonReset() noexcept {
 void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_address) noexcept {
     std::lock_guard lock(g_mutex);
     g_state.camera_address = race_camera_address;
+    Mtx34 race_view{};
+    g_state.race_camera_world_valid = race_camera_address != 0 &&
+        ReadRaceCameraViewMatrix(TryGetCpuContext(), race_camera_address, race_view,
+                                 ReadRaceCameraBlend());
+    if (g_state.race_camera_world_valid) {
+        for (int axis = 0; axis < 3; ++axis) {
+            g_state.race_camera_world[axis] =
+                -(race_view[axis] * race_view[3] + race_view[4 + axis] * race_view[7] +
+                  race_view[8 + axis] * race_view[11]);
+        }
+    }
     if (!g_state.enabled) {
         g_state.anchor = {};
         g_state.hold_frames = 0;
@@ -1393,6 +1440,14 @@ void MkwVRFirstPersonCommit() noexcept {
 FirstPersonAnchor MkwVRFirstPersonGetAnchor() noexcept {
     std::lock_guard lock(g_mutex);
     return g_state.anchor;
+}
+
+bool MkwVRFirstPersonGetRaceCameraPosition(float out[3]) noexcept {
+    if (!out) return false;
+    std::lock_guard lock(g_mutex);
+    if (!g_state.race_camera_world_valid) return false;
+    std::copy(g_state.race_camera_world.begin(), g_state.race_camera_world.end(), out);
+    return true;
 }
 
 } // namespace mkw::vr

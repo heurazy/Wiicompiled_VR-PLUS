@@ -61,6 +61,8 @@ first_person_head_right_meters = 0.0
 first_person_hide_driver = true
 first_person_hidden_model = 0
 first_person_rotation = "yaw_pitch"
+first_person_follow_vehicle_motion = true
+first_person_motion_level = 4 # Safe; 1 tilt, 2 tilt + side movement, 3 full
 steering_wheel = true
 native_steering_wheel = true
 hand_steering = true
@@ -389,10 +391,20 @@ The game's own transforms are never modified. Each guest frame the runtime reads
 view matrix and the player kart's physics pose and derives one affine transform from the recorded
 view space into the space to render from. That transform is published with the sealed frame, and
 the renderer composes it onto every perspective draw's model-view matrix, alongside the headset's
-own per-eye delta. The kart's *physics* pose is used deliberately, not the animated model: an
-animated frame would bob and lurch the camera.
+ own per-eye delta. In the comfort modes the simulation and physics poses keep
+ item and trick animations from spinning the camera; Full intentionally uses the
+ animated body.
 
-`first_person_rotation` decides where the view's orientation comes from, mirroring DolphinXR's
+In the cockpit, `first_person_follow_vehicle_motion` is enabled by default. Its
+`first_person_motion_level` is **4 (Safe)** by default: small bumps and brief slopes
+are ignored; larger sustained pitch and bank are eased and speed-limited. Level 1
+follows physical pitch and bank, level 2 also follows bounded sideways seat motion,
+and level 3 follows the full animated vehicle, including item hits and tricks. The
+F10 VR camera settings expose the same choices. Turning vehicle motion off restores
+the traditional rotation setting below.
+
+`first_person_rotation` decides where the view's orientation comes from when vehicle
+motion is off, mirroring DolphinXR's
 camera-anchor modes. `"yaw"` keeps the horizon level through a chase-camera tilt or a banked corner.
 `"yaw_pitch"`, the default, adds the kart's climb, so a slope or a wheelie tips the view while a
 banked corner still never rolls it: sitting in the cockpit, the vehicle's own climb reads as the
@@ -401,7 +413,7 @@ All three are the same construction from a forward and an up axis, differing onl
 they take: pairing a forward with world up is what removes roll. The headset always adds free look
 on top of whichever is chosen, and only the translation onto the head is common to all three.
 
-In the cockpit, `"yaw"` takes the kart's own driving direction rather than the chase camera's
+With vehicle motion disabled in the cockpit, `"yaw"` takes the kart's own driving direction rather than the chase camera's
 lagging heading, from the level seat frame, which also damps a damage spin. `"yaw_pitch"`, the
 default, and `"full"` take the kart's live orientation about that same seat, keeping only its
 stabilised position, so a wheelie, a slope or a spin moves the view with the vehicle. With the custom seat, the head's place in the kart is

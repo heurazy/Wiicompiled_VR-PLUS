@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vr/openxr_settings_panel.h"
+#include "vr/mkw_vr_policy.h"
 
 #include <atomic>
 #include <mutex>
@@ -25,6 +26,7 @@ PublishedPointer& Published() {
 
 void OpenXRSetSettingsPanelOpen(bool open) noexcept {
     settings_panel_bridge::g_open.store(open, std::memory_order_release);
+    MkwVRPolicySetSettingsVisible(open);
 }
 
 bool OpenXRSettingsPanelOpen() noexcept {
