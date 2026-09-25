@@ -9,6 +9,27 @@ Nintendo code, game assets, a translated game executable, or a ROM. You must pro
 clean PAL `RMCP01` disc image and compile the game locally.
 
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
+## Roadmap
+- automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
+- sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
+- fix low FPS in menu : planned
+- new hand models : planned
+- fix character height : planned
+- fix black hand in front of HUD : planned
+- VR course object culling based on the player's view rather than the kart's direction: implemented in source; headset verification pending.
+- better motorcycle controls : planned
+- more vehicles visual steering wheel compatibility : planned
+- Bullet Bill temporarily uses the game's original camera, then restores the selected VR camera.
+- option to move with the kart : planned
+- more control options : planned
+- throwing shells and other items option : planned
+<details>
+  <summary><h2>DONE</h2></summary>
+
+  - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
+  - periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
+
+</details>
 
 ## What the port adds
 
@@ -34,7 +55,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 - Retro Rewind VR support through WheelWizard, with pack updates, patch preparation,
   compiled-product repair, and access to the VR installation's saves, friends and Miis.
   See [WheelWizard feature coverage](docs/WHEELWIZARD-VR.md) for the local integration
-  and its limits; these changes are not yet included in the published v1.0 release.
+  and its limits.
 
 ## Requirements
 
@@ -52,7 +73,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
 
 ### Guided installer
 
-1. Download `WiiCompiled-Setup.exe` from the [v1.0 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.0).
+1. Download `WiiCompiled-Setup.exe` from the [v1.1.1 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.1.1).
 2. Start SteamVR, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
@@ -65,7 +86,7 @@ finishes. Select **Mario Kart Wii VR** or **Retro Rewind VR** from that launcher
 
 ### Portable bundle
 
-Download `WiiCompiled-VR-Portable-v1.0.zip`, extract the complete folder, and run
+Download `WiiCompiled-VR-Portable-v1.1.1.zip`, extract the complete folder, and run
 `WiiCompiled-VR-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
 The launcher is at `WheelWizard/WheelWizard.exe`; the `UserData` folder keeps configuration, NAND,
 cache, and logs beside the portable installation. `Update-VR.cmd` updates the VR runtime while
@@ -74,7 +95,7 @@ preserving personal and compiled game data.
 No release contains a ROM or a translated game executable. Compilation is intentionally performed
 locally from the disc image you select.
 
-## USB steering wheels and pedals (source build)
+## USB steering wheels and pedals
 
 Open **VR settings > Hardware wheel** (also available in desktop controller settings).
 Select the steering device and axis; record full left, full right and center. Select each
@@ -97,7 +118,7 @@ capped at 15%; no constant torque, spring or centering effect is requested. Rumb
 on the driver; lack of rumble does not prevent driving. This is not simulated tire-force feedback.
 An incomplete/disconnected setup gives neutral race input. Close options and release held buttons
 and pedals before driving. Hardware/driver compatibility needs testing; no universal device support
-is claimed. These additions require rebuilding and are not in the existing v1.0 download.
+is claimed.
 
 ## Quest and OpenXR controls
 
@@ -141,11 +162,18 @@ when the animation ends or is skipped.
 The original and diorama cameras show the race HUD, minimap, and item roulette on a panel that can
 follow the left hand. First person anchors the same HUD in front of the seat. **VR settings >
 Display** controls panel distance and width; **Camera** controls seat trim and world scale.
+During a Bullet Bill transformation, the view temporarily switches to the game's original camera
+so the Bullet Bill model does not block vision; it restores the chosen camera when the item ends.
 
-The physical wheel and camera are stabilised during impacts, spins, airborne tricks, and Lightning
-scale changes. This keeps the view and hand controls attached to the kart without making the world
-rotate with a damage animation. **Show control tutorials again** resets the first-race and
-first-person guides.
+The first-person camera follows the kart in **Safe: large slopes only** mode by default. It ignores small bumps and brief slopes,
+then gradually follows sustained steep pitch and bank with a limited angle and turning speed.
+Use **VR settings > Cameras > Follow kart motion in first person** to turn this off or choose another detail level:
+**Tilt only** follows every track pitch and bank, **Tilt + side-to-side** also moves with the
+seat's lateral sway, and **All motion** follows the complete vehicle animation, including item
+hits, banana spins and tricks. Safe and the other comfort modes exclude damage and trick spins.
+These settings apply immediately and are saved as
+`first_person_follow_vehicle_motion` and `first_person_motion_level` in `Config.toml`.
+**Show control tutorials again** resets the first-race and first-person guides.
 
 ## VR settings
 
@@ -153,8 +181,8 @@ Open VR settings with **X + Y** in the headset or **F10** on the desktop mirror.
 
 - **Graphics:** per-eye resolution, sharp rendering, preferred headset refresh rate, FPS display,
   adaptive resolution, and menu shader quality (`Off`, `Low`, `Balanced`, `High`).
-- **Camera and Display:** default camera, first-person head offsets, world scale, HUD width and
-  distance, and seat reset.
+- **Camera and Display:** default camera, first-person head offsets, optional kart motion follow,
+  world scale, HUD width and distance, and seat reset.
 - **Driving:** native steering-wheel animation, kart and motorcycle steering range, acquisition
   depth, grab assistance, smoothing, tracking-loss tolerance, and haptics.
 - **Input:** controller profile diagnostics and stick deadzone calibration.
@@ -197,7 +225,7 @@ release target is Windows/D3D12 with OpenXR enabled. The main build scripts are:
 dotnet build translator/Translator.sln -c Release
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Installer.ps1
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Portable.ps1 `
-  -SetupExecutable Launcher/dist/WiiCompiled-Setup.exe -Version 1.0
+  -SetupExecutable Launcher/dist/WiiCompiled-Setup.exe -Version 1.1
 ```
 
 The build boundary deliberately excludes translated game code and game data from Git and releases.
@@ -205,7 +233,10 @@ See [OPENXR.md](OPENXR.md) for the implementation details, configuration keys, c
 and validation notes.
 
 ## Credits
-
+- **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **iChris4**: 
+  This project originated as a fork of iChris4's pioneering OpenXR VR port of WiiCompiled. 
+  The core OpenXR integration, stereo rendering pipeline, and initial VR translation hooks 
+  were built by iChris4.
 - **[WheelWizard](https://github.com/TeamWheelWizard/WheelWizard)** by Team WheelWizard, integrated
   as the local launcher and Retro Rewind front end.
 - **[BigWalkVRInstaller](https://github.com/CircuitLord/BigWalkVRInstaller)** by CircuitLord, whose

@@ -98,5 +98,9 @@ MKW_KNOWN_NATIVE_CPU_CALL(0x80084D20u, nw4r__lyt__detail__DrawQuad_80084d20);
 // invokes the original translated function before extending a rejected box.
 extern "C" void IntersectAabbForVr(CpuContext* ctx);
 MKW_KNOWN_NATIVE_CPU_CALL(0x80086610u, IntersectAabbForVr);
+// The race scene calls ClipInfoMgr::Update through a translated direct call.
+// Keep that edge on InvokeDirectCpu so its VR post-processing is not skipped.
+extern "C" void UpdateClipInfoForVr(CpuContext* ctx);
+MKW_KNOWN_NATIVE_CPU_CALL(0x80787774u, UpdateClipInfoForVr);
 
 #undef MKW_KNOWN_NATIVE_CPU_CALL

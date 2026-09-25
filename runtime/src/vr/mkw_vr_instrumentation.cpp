@@ -7,10 +7,12 @@
 #include "runtime_log.h"
 #include "vr/mkw_vr_first_person.h"
 #include "vr/mkw_vr_policy.h"
+#include <aurora/gfx.h>
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cmath>
 #include <mutex>
 
 extern "C" int g_gxFrameCount;
@@ -22,6 +24,10 @@ constexpr uint32_t kRaceSceneOnEnter = 0x80553C50u;
 constexpr uint32_t kRaceSceneOnExit = 0x805549B0u;
 constexpr uint32_t kRaceCameraUpdate = 0x805A21D0u;
 constexpr uint32_t kScnMgrRaceDraw = 0x805B1CD8u;
+constexpr uint32_t kLayoutUIControlDraw = 0x8063DB84u;
+constexpr uint32_t kNameBalloonUpdatePosition = 0x807F1094u;
+// CtrlRaceNameBalloon::__ct installs this vtable (PAL RMCP01).
+constexpr uint32_t kNameBalloonVtable = 0x808D3E58u;
 // PAL RMCP01 RaceScene::GetScreenCount (0x80554F68) reads the active
 // RaceScene pointer from this SDA-backed slot, then returns byte 0x25. Keep
 // this synchronized with projects/mkwii/MAP.txt and the generated function.
@@ -34,10 +40,40 @@ struct InstrumentationState {
     uint32_t camera_count = 0;
     uint32_t last_reported_camera_count = UINT32_MAX;
     uint32_t last_reported_screen_count = UINT32_MAX;
+    struct NameplatePlayer {
+        uint32_t control = 0;
+        uint32_t player = 0;
+    };
+    std::array<NameplatePlayer, 48> nameplate_players{};
+    uint32_t nameplate_player_count = 0;
 };
 
 std::mutex g_instrumentation_mutex;
 InstrumentationState g_instrumentation;
+
+void RememberNameplatePlayer(uint32_t control, uint32_t player) noexcept {
+    if (control == 0 || player >= 12) return;
+    std::lock_guard lock(g_instrumentation_mutex);
+    for (uint32_t i = 0; i < g_instrumentation.nameplate_player_count; ++i) {
+        auto& entry = g_instrumentation.nameplate_players[i];
+        if (entry.control == control) {
+            entry.player = player;
+            return;
+        }
+    }
+    if (g_instrumentation.nameplate_player_count < g_instrumentation.nameplate_players.size())
+        g_instrumentation.nameplate_players[g_instrumentation.nameplate_player_count++] =
+            {control, player};
+}
+
+uint32_t NameplatePlayer(uint32_t control) noexcept {
+    std::lock_guard lock(g_instrumentation_mutex);
+    for (uint32_t i = 0; i < g_instrumentation.nameplate_player_count; ++i) {
+        const auto& entry = g_instrumentation.nameplate_players[i];
+        if (entry.control == control) return entry.player;
+    }
+    return UINT32_MAX;
+}
 
 uint64_t GuestFrame() noexcept {
     return static_cast<uint64_t>(static_cast<uint32_t>(g_gxFrameCount));
@@ -137,9 +173,48 @@ void PublishObservedCamera(uint64_t frame, uint32_t address) noexcept {
     MkwVRPolicyPublishRaceCamera(camera);
 }
 
+void ObserveRaceUiControl(const CpuContext* context) noexcept {
+    aurora_set_stereo_hud_world_depth(0.f);
+    if (context == nullptr) return;
+    const uint32_t control = context->gpr[3];
+    uint32_t vtable = 0;
+    if (!Memory::TryRead32(control, vtable)) return;
+    if (vtable != kNameBalloonVtable || !Memory::Contains(control, 388)) return;
+    uint32_t positions = 0;
+    uint32_t pane = 0;
+    if (!Memory::TryRead32(control + 380, positions) ||
+        !Memory::TryRead32(control + 384, pane) ||
+        !Memory::Contains(pane + 44, 8)) return;
+    float camera[3]{};
+    if (!MkwVRFirstPersonGetRaceCameraPosition(camera)) return;
+    try {
+        // OnUpdate can choose either its stored racer or a spectator target.
+        // Use the exact index passed to UpdatePosition for this control.
+        const uint32_t player = NameplatePlayer(control);
+        if (player >= 12 || !Memory::Contains(positions + 32 + player * 12, 12)) return;
+        const float anchorX = Memory::ReadFloat32(pane + 44);
+        const float anchorY = Memory::ReadFloat32(pane + 48);
+        if (!std::isfinite(anchorX) || !std::isfinite(anchorY)) return;
+        float distance2 = 0.f;
+        for (uint32_t axis = 0; axis < 3; ++axis) {
+            const float position = Memory::ReadFloat32(positions + 32 + player * 12 + 4 * axis);
+            if (!std::isfinite(position)) return;
+            const float delta = position - camera[axis];
+            distance2 += delta * delta;
+        }
+        if (std::isfinite(distance2) && distance2 > 0.f) {
+            aurora_set_stereo_hud_world_anchor(anchorX, anchorY);
+            aurora_set_stereo_hud_world_depth(std::sqrt(distance2));
+        }
+    } catch (const Memory::AccessViolation&) {
+        // A control being torn down keeps the ordinary 2D presentation.
+    }
+}
+
 } // namespace
 
 void MkwVRInstrumentationInitialize() noexcept {
+    aurora_set_stereo_hud_world_depth(0.f);
     MkwVRPolicySetAvailableBindings(
         MkwVRBindingSceneState | MkwVRBindingRaceCamera |
         MkwVRBindingDrawClassification | MkwVRBindingCulling);
@@ -153,6 +228,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
     const uint64_t frame = GuestFrame();
     switch (address) {
     case kRaceSceneOnEnter: {
+        aurora_set_stereo_hud_world_depth(0.f);
         {
             std::lock_guard lock(g_instrumentation_mutex);
             g_instrumentation = {};
@@ -174,6 +250,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
         break;
     }
     case kScnMgrRaceDraw: {
+        aurora_set_stereo_hud_world_depth(0.f);
         // RaceCamera objects are not a player-count source: the game may update
         // additional cameras for transitions and effects. Use the same exact
         // screen count as RaceScene::GetScreenCount, while retaining the camera
@@ -189,6 +266,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
         break;
     }
     case kRaceSceneOnExit: {
+        aurora_set_stereo_hud_world_depth(0.f);
         MkwVRSceneObservation scene{};
         scene.mode = VRSceneMode::Other;
         scene.guest_frame_index = frame;
@@ -199,6 +277,13 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
                                << std::endl;
         break;
     }
+    case kLayoutUIControlDraw:
+        ObserveRaceUiControl(context);
+        break;
+    case kNameBalloonUpdatePosition:
+        if (context != nullptr)
+            RememberNameplatePlayer(context->gpr[3], context->gpr[4] & 0xffu);
+        break;
     default:
         break;
     }

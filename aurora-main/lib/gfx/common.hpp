@@ -431,6 +431,10 @@ uint32_t get_stereo_foveation() noexcept;
 // `width` and `distance` are in game world units; the screen's height follows
 // the game's presented aspect ratio. Also live.
 void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept;
+void set_stereo_hud_world_depth(float distance) noexcept;
+float get_stereo_hud_world_depth() noexcept;
+void set_stereo_hud_world_anchor(float x, float y) noexcept;
+std::pair<float, float> get_stereo_hud_world_anchor() noexcept;
 bool get_stereo_hud_screen_enabled() noexcept;
 // The screen's width and distance in world units, kept while the 2D layer is off it.
 void get_stereo_hud_screen_size(float& width, float& distance) noexcept;

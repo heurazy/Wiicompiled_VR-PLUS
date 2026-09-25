@@ -35,7 +35,9 @@ bool WithinGuestOmnidirectionalRange(uint32_t frustum_address, uint32_t box_addr
     return WithinOmnidirectionalRange(frustum, box);
 }
 
-void UpdateClipInfoForVr(CpuContext* context) {
+} // namespace
+
+extern "C" void UpdateClipInfoForVr(CpuContext* context) {
     const uint32_t manager = context->gpr[3];
     // Keep the game's distance, area and object-state calculations intact.
     // This function runs once per game tick, before objects use its screen flags.
@@ -68,8 +70,6 @@ void UpdateClipInfoForVr(CpuContext* context) {
         }
     }
 }
-
-} // namespace
 
 extern "C" void IntersectAabbForVr(CpuContext* context) {
     const uint32_t frustum = context->gpr[3];

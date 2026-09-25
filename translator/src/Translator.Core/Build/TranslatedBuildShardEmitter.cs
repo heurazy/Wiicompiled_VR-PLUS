@@ -703,7 +703,11 @@ public static partial class TranslatedBuildShardEmitter
         0x80008EF0 or 0x80008FB4 or 0x80009194 or 0x80243D18 or 0x80243D6C or 0x808897F0 or
         0x802226D8 or 0x805C3218 or 0x805E7460 or 0x8063C470 or 0x8063C4D4 or 0x8063C560 or 0x8063C714 or
         0x80198CA8 or 0x80199038 or 0x801992A8 or 0x801998A4 or 0x80226C78 or 0x80226EBC or 0x80229814 or 0x80229C5C or 0x80229DCC or 0x80229DD8 or
-        0x801A7424 or 0x80672CC8 => true,
+        0x801A7424 or 0x80672CC8 or
+        // These addresses have VR culling overrides selected at runtime. The
+        // static translated edge would bypass both native registration and
+        // KnownNativeCpuCall, leaving coins tied to the kart-facing frustum.
+        0x80086610 or 0x80787774 => true,
         _ => false
     };
 

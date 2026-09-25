@@ -625,8 +625,8 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
   stage_f32(g_gxState.renderViewport.height);
   stage_f32(g_gxState.logicalViewport.width);
   stage_f32(g_gxState.logicalViewport.height);
-  // Fragment-depth output bypasses the fixed viewport transform, so exact
-  // screen depth applies that same clamped window explicitly.
+  // The stereo replay replaces these values with the physical HUD depth
+  // plane; retain the original viewport range in the recorded mono uniform.
   stage_f32(depthNear);
   stage_f32(depthFar - depthNear);
   for (const auto& vaRange : ranges.vaRanges) {

@@ -298,8 +298,12 @@ function Get-MkwNativeConfigureArguments {
         }
     }
 
+    # Clear any prebuilt package cached by an earlier configure when its source
+    # fingerprint no longer matches. Otherwise CMake silently links stale Aurora.
     if (-not [string]::IsNullOrWhiteSpace($NativePrebuiltDirectory)) {
         $arguments += "-DMKW_NATIVE_PREBUILT_DIR=$(ConvertTo-MkwCMakePath $NativePrebuiltDirectory)"
+    } else {
+        $arguments += '-DMKW_NATIVE_PREBUILT_DIR='
     }
 
     $arguments += $AdditionalArguments

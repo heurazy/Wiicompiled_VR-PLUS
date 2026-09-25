@@ -2494,7 +2494,13 @@ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, g
       };
     }
   const bool perspective = g_gxState.projType == GX_PERSPECTIVE;
-  const auto uniformRanges = build_uniform(info, vertRange.offset, ranges, drawIdentity, perspective, usedPnMtxMask);
+  auto uniformRanges = build_uniform(info, vertRange.offset, ranges, drawIdentity, perspective, usedPnMtxMask);
+  if (!perspective && aurora::stereo_frame_provider_active()) {
+    uniformRanges.replayLayout.worldHudDepth = aurora::gfx::get_stereo_hud_world_depth();
+    const auto [anchorX, anchorY] = aurora::gfx::get_stereo_hud_world_anchor();
+    uniformRanges.replayLayout.worldHudAnchorX = anchorX;
+    uniformRanges.replayLayout.worldHudAnchorY = anchorY;
+  }
   const auto& replayLayout = uniformRanges.replayLayout;
   const bool stereo = aurora::stereo_frame_provider_active();
   const bool screen = !replayLayout.perspective && !replayLayout.nativeEfbEffect;

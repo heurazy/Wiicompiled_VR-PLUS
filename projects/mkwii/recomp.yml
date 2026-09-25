@@ -46,6 +46,8 @@ translation:
       - 0x805549B0 # RaceScene::OnExit
       - 0x805A21D0 # RaceCamera::Update
       - 0x805B1CD8 # ScnMgrRace::Draw
+      - 0x8063DB84 # LayoutUIControl::Draw (world-positioned racer labels)
+      - 0x807F1094 # CtrlRaceNameBalloon::UpdatePosition (active racer id)
 
 runtime:
   native_registration_root: runtime/src

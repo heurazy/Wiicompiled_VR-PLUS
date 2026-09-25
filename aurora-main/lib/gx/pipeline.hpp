@@ -32,7 +32,7 @@ struct DrawData {
   std::optional<gfx::stereo_replay::SubviewRect> screenRect;
 };
 
-constexpr uint32_t GXPipelineConfigVersion = 21;
+constexpr uint32_t GXPipelineConfigVersion = 22;
 
 constexpr GXFogType effective_pipeline_fog_type(GXFogType fogType, GXZTexOp zTextureOp, bool zCompLocBeforeTex,
                                                 GXBlendMode blendMode, GXLogicOp logicOp) noexcept {

@@ -128,6 +128,11 @@ bool aurora_stereo_foveation_available();
 // Also live; a cleared flag or a non-positive size leaves 2D content on its
 // recorded GX transforms.
 void aurora_set_stereo_hud_screen(bool enabled, float width, float distance);
+// Tags the currently drawn game UI control as a world-depth name balloon.
+// Zero restores the ordinary HUD plane. The value is in scene units.
+void aurora_set_stereo_hud_world_depth(float distance);
+// Original screen-space center of the name balloon, in game UI coordinates.
+void aurora_set_stereo_hud_world_anchor(float x, float y);
 bool aurora_get_stereo_hud_screen_enabled();
 
 // Aspect ratios behind the most recent headset frame's 2D content, for mapping a

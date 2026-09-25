@@ -79,6 +79,8 @@ wgpu::Buffer g_indexBuffer;
 wgpu::Buffer g_storageBuffer;
 uint32_t g_drawCallCount = 0;
 uint32_t g_mergedDrawCallCount = 0;
+float get_stereo_hud_world_depth() noexcept { return 0.0f; }
+std::pair<float, float> get_stereo_hud_world_anchor() noexcept { return {0.0f, 0.0f}; }
 } // namespace aurora::gfx
 
 namespace aurora::webgpu {
