@@ -1,14 +1,32 @@
-# Mario Kart Wii VR Port
+# Mario Kart Wii VR Port — Wiicompiled VR PLUS
 
-Mario Kart Wii VR Port is a native Windows VR port of Mario Kart Wii. It combines WiiCompiled's
-static recompilation with a native OpenXR renderer and tracked-controller input. The game runs as
-native x86-64 code; no Wii emulator, interpreter, JIT, or PowerPC CPU is used at runtime.
+This is the **Wiicompiled VR PLUS** fork of [iChris4/Wiicompiled_VR](https://github.com/iChris4/Wiicompiled_VR). It combines that OpenXR port with the VR gameplay, controller, launcher and packaging work from [heurazy/mario-kart-wii-VR-port](https://github.com/heurazy/mario-kart-wii-VR-port), then adds a standalone Android build for Quest.
 
-This repository distributes the VR port, its installer, and its build tools. It does not distribute
-Nintendo code, game assets, a translated game executable, or a ROM. You must provide your own
-clean PAL `RMCP01` disc image and compile the game locally.
+On Windows, the game is statically recompiled to native x86-64 and rendered through OpenXR. On Quest standalone, the ARM64 build runs locally with Vulkan and OpenXR. Neither version runs the game through a Wii emulator, interpreter or JIT.
 
-[Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
+This repository contains source code, build tools and integration patches. It does **not** contain Nintendo game code, a translated game executable, a ROM or Retro Rewind's game files. You must provide your own clean PAL `RMCP01` disc image and build the game on your own device.
+
+[Browse Wiicompiled VR PLUS](https://github.com/heurazy/Wiicompiled_VR-PLUS) · [Release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases) · [Original Mario Kart Wii VR port](https://github.com/heurazy/mario-kart-wii-VR-port)
+
+> The PLUS repository currently has no published release assets. Instructions and binaries from the original port's releases are for that project and may not match this fork.
+
+## What this fork adds
+
+Compared with the original Mario Kart Wii VR port, this fork brings together the earlier port's user facing improvements, imports additional OpenXR features from iChris4's branch, and adds the Quest standalone target.
+
+- **Quest standalone:** an Android ARM64 app runs Mario Kart Wii and Retro Rewind on Quest without a PC, SteamVR or wireless PC streaming during play. It uses Vulkan and OpenXR. The Quest 3 is the tested standalone headset; see [the Quest preview guide](docs/quest3-preview.md) for setup and current limits.
+- **Quest Touch Plus controllers:** textured controller models, animated buttons and thumbsticks, pointer interaction in menus and controller specific tutorial diagrams.
+- **Comfortable driving cameras:** original, first person and diorama views. First person hides the driver and adjusts for different character heights. A right stick click changes view. Optional kart movement modes include a smoothed Safe mode that follows sustained slopes and banks.
+- **Physical driving controls:** tracked hands can grip and turn the kart wheel or motorcycle handlebars. Steering supports one or two hands, passing through the centre, continuous full turns and brief tracking loss. Native vehicle steering animation can be switched off. USB wheels, pedals and paddle buttons can be calibrated; feedback is optional and light.
+- **Spatial VR UI:** the camera chooser, VR settings, controller tutorials and supported Mario Kart menus sit in VR space and can be selected with a pointer. The first launch explains camera choice and controls; tutorials can be reset in settings.
+- **VR HUD and visibility fixes:** the circuit map and item panel appear on the left hand, while first person anchors its HUD ahead of the seat. Hand depth, track object culling, race menu rendering, display orientation and the Bullet Bill camera have dedicated VR handling.
+- **Performance controls:** per eye resolution, sharpening, refresh preference, adaptive resolution, diagnostics and menu shader quality. Frame interpolation is disabled on Quest because it makes the standalone presentation unstable; the game's simulation speed remains unchanged.
+- **Controller compatibility:** OpenXR action bindings and profiles for Quest, Valve Index, Vive, Windows Mixed Reality and PICO. Stick calibration, headset button shortcuts and the original port's exact controls are documented below.
+- **Wheel Wizard integration:** the bundled launcher does more than start the game. It connects the VR installation to Retro Rewind updates, mod and patch preparation, compiled product validation and repair, and Retro WFC payload management. Saves, Miis and license names use the VR installation's paths; license renaming works even without a NAND Mii. See [the Wheel Wizard integration guide](integrations/README.md) and [feature coverage and limitations](docs/WHEELWIZARD-VR.md).
+- **Stability and packaging:** upgraded installs ignore inherited Wii Remote rescanning unless the user opts in, USB wheel discovery follows device hotplug, and setup plus portable builds preserve the local games and saves. See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md).
+
+The project retains upstream WiiCompiled/OpenXR features as well. The sections below explain the Windows setup, controls, VR settings and build process; the Quest setup is documented separately.
+
 ## OpenXR integration
 
 The fusion now includes the original controls and SteamVR shortcuts, Index/Vive/WMR/PICO
@@ -18,28 +36,33 @@ See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md) for exact bind
 upgrade behavior and the remaining hardware validation.
 
 ## Roadmap
-- automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
-- sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
-- fix low FPS in menu : planned
-- new hand models : planned
-- fix character height : planned
-- fix black hand in front of HUD : planned
-- VR course object culling based on the player's view rather than the kart's direction: implemented in source; headset verification pending.
-- better motorcycle controls : planned
-- more vehicles visual steering wheel compatibility : planned
-- Bullet Bill temporarily uses the game's original camera, then restores the selected VR camera.
-- option to move with the kart : planned
-- more control options : planned
-- throwing shells and other items option : planned
-<details>
-  <summary><h2>DONE</h2></summary>
 
-  - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
-  - periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
+This keeps the roadmap from the [original port](https://github.com/heurazy/mario-kart-wii-VR-port), with status updated for this fork. “Implemented” means the change is in this branch; it does not imply every headset, game mode or wheel model has been tested.
 
-</details>
+### Implemented in this fork
 
-## What the port adds
+- Correct upside down race output for affected display paths.
+- USB sim racing wheel and pedal input, calibration and optional light rumble.
+- Higher menu rendering rates without speeding up the game.
+- Textured, animated Quest Touch Plus models and controller visual fixes.
+- Character height adjustment for first person, including temporary resize effects.
+- Correct hand depth in front of the HUD.
+- Course object culling based on the player's view direction.
+- Improved motorcycle handlebar controls and steering animation coverage.
+- Bullet Bill temporarily uses the game's original camera, then restores the selected VR view.
+- Optional first person motion linked to the kart, with configurable movement and comfort modes.
+- Additional controller options, onboarding and resettable tutorials.
+- Multiplayer local player camera and save/launcher fixes. Online play depends on Retro WFC and its availability.
+- Periodic controller discovery freezes: inherited Wii Remote background scanning is off after upgrade unless enabled; USB wheel discovery reacts to hotplug.
+
+### Still to validate or build
+
+- Test the Quest standalone build and its graphics settings across more Quest models and firmware versions. The latest Quest frame interpolation change needs headset confirmation; interpolation stays off on Quest meanwhile.
+- Expand the tested compatibility list for USB steering wheels, pedal sets, paddle mappings and vibration drivers.
+- Keep improving item aiming and throwing options, especially for manually steered first person.
+- Confirm view based object culling, multiplayer cameras and the controller tutorials across more tracks, game modes and OpenXR runtimes.
+
+## VR feature details
 
 - Native OpenXR rendering through D3D12 with a desktop mirror and a safe desktop fallback.
 - Three race cameras: the original game camera, a true first-person cockpit camera, and a distant
@@ -81,7 +104,7 @@ upgrade behavior and the remaining hardware validation.
 
 ### Guided installer
 
-1. Download `WiiCompiled-Setup.exe` from the [v1.1.1 release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/tag/v1.1.1).
+1. Download the Windows setup asset from this fork's [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases), when one is available.
 2. Start SteamVR, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
@@ -94,14 +117,22 @@ finishes. Select **Mario Kart Wii VR** or **Retro Rewind VR** from that launcher
 
 ### Portable bundle
 
-Download `WiiCompiled-VR-Portable-v1.1.1.zip`, extract the complete folder, and run
-`WiiCompiled-VR-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
-The launcher is at `WheelWizard/WheelWizard.exe`; the `UserData` folder keeps configuration, NAND,
-cache, and logs beside the portable installation. `Update-VR.cmd` updates the VR runtime while
-preserving personal and compiled game data.
+Download this fork's portable archive from its [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases), when one is available. Extract the complete folder and run
+`WiiCompiled-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
+Start the launcher with `Launch-WiiCompiled-VR.cmd` or `WheelWizard/WheelWizard.exe`. The
+`UserData` folder keeps configuration, NAND, cache and logs beside the portable installation.
+Keep the whole folder when moving or updating it so saves and compiled games remain available.
 
 No release contains a ROM or a translated game executable. Compilation is intentionally performed
 locally from the disc image you select.
+
+### Quest standalone
+
+Quest standalone is a separate Android build; the Windows setup and portable archive do not install it. The current preview targets ARM64 and has been tested on Quest 3. For a local build, APK installation, game import and Retro Rewind setup, follow [the Quest 3 preview guide](docs/quest3-preview.md) and [Android build guide](android/README.md). The APK does not bundle your ROM or translated game. Import a `.wcgame` compiled from your own PAL image and keep your game data on the headset. After setup, the game runs without a PC or SteamVR.
+
+The current stock Dawn APK does not include fragment density map foveation. See the preview guide for the source build option and exact SDK/toolchain requirements.
+
+Frame interpolation is deliberately unavailable on Quest: the runtime forces it off even if an old config requests it, and the Quest settings omit the control. The game's 60 Hz simulation speed remains unchanged while the headset tracks head motion at its selected refresh rate. This Quest only setting does not change Windows interpolation options.
 
 ## USB steering wheels and pedals
 
@@ -206,9 +237,11 @@ WheelWizard is bundled as the launch and mod-selection front end. It has two loc
 - **Mario Kart Wii VR**, using the base compiled game;
 - **Retro Rewind VR**, using the separate Retro Rewind static profile.
 
-The upstream WheelWizard updater is disabled for these local VR bundles so it cannot replace the
-VR-specific launcher integration. Retro Rewind is optional during setup and requires its own local
-compilation from the same clean PAL image.
+The VR integration pins and patches Wheel Wizard to keep its local recompilation paths connected to
+the correct game data and saves. Its pack updater and mod preparation work with this installation;
+runtime upgrades can require the original PAL image configured in settings. Retro Rewind is optional
+during setup and needs its own local compilation from the same clean PAL image. Online rooms and
+races still depend on Retro WFC service availability, compatible game versions and end to end testing.
 
 ## Troubleshooting
 
@@ -226,15 +259,18 @@ compilation from the same clean PAL image.
 
 ## Building from source
 
-Building requires .NET 8, CMake, Ninja, LLVM-MinGW, and a clean PAL `RMCP01` image. The supported
-release target is Windows/D3D12 with OpenXR enabled. The main build scripts are:
+For Windows, building requires .NET 8, CMake, Ninja, LLVM-MinGW, and a clean PAL `RMCP01` image.
+The Windows release uses D3D12 and OpenXR. The main build scripts are:
 
 ```powershell
 dotnet build translator/Translator.sln -c Release
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Installer.ps1
+powershell -ExecutionPolicy Bypass -File Launcher/Build-WheelWizard.ps1
 powershell -ExecutionPolicy Bypass -File Launcher/Build-Portable.ps1 `
-  -SetupExecutable Launcher/dist/WiiCompiled-Setup.exe -Version 1.1
+  -SetupPath Launcher/dist/WiiCompiled-Setup.exe -Name WiiCompiled-VR-Portable
 ```
+
+Quest builds use a separate Android toolchain and `android/Build-Quest.ps1`; see [the Android build guide](android/README.md). Building either target compiles game code locally from your disc. It does not add the game to Git or a release archive.
 
 The build boundary deliberately excludes translated game code and game data from Git and releases.
 See [OPENXR.md](OPENXR.md) for the implementation details, configuration keys, controller profiles,
