@@ -1,3 +1,4 @@
+#include "vr/steamvr_launch.h"
 #include <algorithm>
 #include <atomic>
 #include <cctype>
@@ -1384,8 +1385,21 @@ int RuntimeMain(int argc, char** argv) {
             throw std::invalid_argument("The game runtime does not accept command-line options; use Config.toml through the installed host.");
         }
         RuntimeConfigFile::LogLoadedConfig();
+        if (RuntimeConfigFile::Get().vrForceSteamVr && !std::getenv("MKW_VALIDATE_DISPATCH_ONLY")) {
+            if (!mkw::vr::SelectSteamVrRuntime()) std::cerr << "[vr] SteamVR was not found; using the available OpenXR runtime.\n";
+        }
         if (RuntimeConfigFile::DiscordPresenceEnabled()) {
             DiscordPresence::Initialize(RuntimeConfigFile::DiscordClientId(), "Mario Kart Wii");
+        }
+        // Build verification without starting a headset session or the game.
+        // Exercise the complete product-specific native/translated registry,
+        // which isolated camera and input tests cannot validate.
+        if (std::getenv("MKW_VALIDATE_DISPATCH_ONLY")) {
+            TranslatedFunctionRegistry::Finalize();
+            RT_LOG(RT_TAG_RUNTIME) << "[runtime] product dispatch validation passed" << std::endl;
+            // No guest or graphics lifecycle was started; bypass shutdown of
+            // their process-wide static objects in this validation-only mode.
+            std::_Exit(EXIT_SUCCESS);
         }
         SystemBridge::Initialize();
         TranslatedFunctionRegistry::Finalize();

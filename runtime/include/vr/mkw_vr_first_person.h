@@ -3,6 +3,7 @@
 #pragma once
 
 #include "vr/steering_wheel.h"
+#include "vr/vr_controls.h"
 
 #include <algorithm>
 #include <array>
@@ -620,6 +621,24 @@ private:
 
 // Enables anchor computation and sets the head offsets and world scale used to
 // convert them. Called whenever the configuration or the F10 toggle changes.
+CameraMode MkwVRGetCameraMode() noexcept;
+void MkwVRSetCameraMode(CameraMode mode) noexcept;
+bool MkwVRRaceIntroActive() noexcept;
+
+inline bool ComputeKartDioramaAnchor(const Mtx34& view, const Mtx34& kart,
+                                     float distance, float height, Mtx34& out) noexcept {
+    if (!detail::IsFiniteFloat(&distance) || !detail::IsFiniteFloat(&height) || distance <= 0 || height < 0) return false;
+    Mtx34 centered{};
+    if (!ComputeFirstPersonAnchor(view, kart, 0, 0, 0, FirstPersonRotation::YawOnly, centered)) return false;
+    const float pitch = std::atan2(height, distance), c = std::cos(pitch), s = std::sin(pitch);
+    const Mtx34 overview{1,0,0,0, 0,c,-s,-c*height+s*distance, 0,s,c,-s*height-c*distance};
+    for (int row=0;row<3;++row) for (int col=0;col<4;++col) {
+        out[row*4+col] = col==3 ? overview[row*4+3] : 0;
+        for (int k=0;k<3;++k) out[row*4+col] += overview[row*4+k]*centered[k*4+col];
+    }
+    return detail::IsFiniteMtx34(out);
+}
+
 void MkwVRFirstPersonConfigure(bool enabled, const FirstPersonHeadOffsets& offsets,
                                float units_per_meter, FirstPersonRotation rotation) noexcept;
 

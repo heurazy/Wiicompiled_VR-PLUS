@@ -109,7 +109,8 @@ internal static class PlatformChecks
 
 internal static class ProductInfo
 {
-    public const string Name = "WiiCompiled";
+    public const string Id = "wiicompiled-openxr-vr";
+    public const string Name = "WiiCompiled OpenXR VR";
     public const string Version = "0.4.0";
 
     /// <summary>
@@ -118,8 +119,8 @@ internal static class ProductInfo
     /// </summary>
     public const string SetupCopyName = "WiiCompiled-Setup.exe";
 
-    public const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WiiCompiled";
+    public const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\WiiCompiledOpenXRVR";
     public static string DefaultInstallDirectory =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "Programs", "WiiCompiled");
+            "Programs", "WiiCompiledOpenXRVR");
 }

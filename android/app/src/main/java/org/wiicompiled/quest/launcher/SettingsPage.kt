@@ -223,12 +223,7 @@ class SettingsPage(
                 read = { stringIndex(it, "vr", "foveation", FOVEATION_LEVELS) },
                 write = { c, index -> c.setString("vr", "foveation", FOVEATION_LEVELS[index]) },
             )
-            choice(
-                R.string.vr_interpolation, R.string.vr_interpolation_helper,
-                listOf(activity.getString(R.string.vr_interpolation_off), activity.getString(R.string.vr_interpolation_auto), "72 FPS", "90 FPS", "120 FPS"),
-                read = { INTERPOLATION_FPS.indexOf(vrInterpolationFps(it)) },
-                write = { c, index -> c.setInteger("vr", "frame_interpolation_fps", INTERPOLATION_FPS[index]) },
-            )
+
         }
         section(R.string.section_vr_screen) {
             // The immersive window is that screen and always carries the HUD.

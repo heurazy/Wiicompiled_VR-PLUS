@@ -21,7 +21,7 @@ PublishedSample& Published() {
     return published;
 }
 
-std::atomic<OpenXRControllerMode> g_mode{OpenXRControllerMode::WiiRemote};
+std::atomic<OpenXRControllerMode> g_mode{OpenXRControllerMode::Gamepad};
 // SDL_JoystickID of the virtual gamepad the samples belong to; 0 when none.
 std::atomic<uint32_t> g_joystick_id{0};
 std::atomic<bool> g_rumble{false};

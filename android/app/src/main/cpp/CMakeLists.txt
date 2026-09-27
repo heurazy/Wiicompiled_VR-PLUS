@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 project(wiicompiled_quest LANGUAGES C CXX ASM)
 
+# A short external cache avoids Ninja's Windows path limit in deep checkouts.
+if(DEFINED ENV{MKW_ANDROID_FETCHCONTENT_BASE_DIR})
+    set(FETCHCONTENT_BASE_DIR "$ENV{MKW_ANDROID_FETCHCONTENT_BASE_DIR}" CACHE PATH "" FORCE)
+endif()
+
 # Gradle drives this file. It hands the repository's runtime/ tree to CMake
 # with the Android-specific choices the desktop build never needs:
 #   * SDL3 comes from the AAR's prefab module (SDLActivity must load the same

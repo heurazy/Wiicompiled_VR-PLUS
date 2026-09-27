@@ -1439,8 +1439,13 @@ static void write_stereo_uniform(std::span<uint8_t> uniform, const gx::UniformRe
     const stereo_replay::HudOverlayPlacement placement = worldNameBalloon
         ? stereo_replay::HudOverlayPlacement{layout.worldHudAnchorX, layout.worldHudAnchorY, 0.55f, 0.07f}
         : stereo_replay::HudOverlayPlacement{};
+    if (eye.handHud && !worldNameBalloon) {
+      screen.halfWidth = .15f;
+      screen.halfHeight = .15f * hudScreen.halfHeight / hudScreen.halfWidth;
+      screen.distance = 1.0f;
+    }
     const auto projection = stereo_replay::compose_hud_screen_projection(
-        eye.projection, worldNameBalloon ? eye.viewFromScene : eye.viewFromCenter,
+        eye.projection, worldNameBalloon ? eye.viewFromScene : eye.handHud ? eye.handHudViewFromPanel : eye.viewFromCenter,
         screen, gameProjection, ndcRemap, placement);
     std::memcpy(uniform.data() + layout.projectionOffset, &projection, sizeof(projection));
   }

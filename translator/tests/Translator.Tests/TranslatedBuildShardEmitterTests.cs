@@ -10,6 +10,59 @@ namespace Translator.Tests;
 public sealed class TranslatedBuildShardEmitterTests
 {
     [Fact]
+    public void NativeWrapperWinsOverAnOlderResolvedRetroProfile()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"translator-native-wrapper-{Guid.NewGuid():N}");
+        var functions = Path.Combine(root, "functions");
+        var native = Path.Combine(root, "runtime", "src");
+        var output = Path.Combine(root, "out");
+        Directory.CreateDirectory(functions);
+        Directory.CreateDirectory(native);
+        try
+        {
+            const string source = """
+                #include "abi_bridge.h"
+                extern "C" void func_80001000(CpuContext*) {}
+                // RECOMP_REGISTRATION base 0x80001000 func_80001000 preserves=true fpr_mask=0x00000000
+                """;
+            Write(Path.Combine(functions, "func_80001000.cpp"), source);
+            var unchanged = source.Replace("80001000", "80002000");
+            Write(Path.Combine(functions, "func_80002000.cpp"), unchanged);
+            Write(Path.Combine(native, "wrapper.cpp"),
+                "REGISTER_NATIVE_FUNCTION_AS(0x80001000, NativeWrapper, \"VR wrapper\");\n");
+            var metadata = Path.Combine(root, "base_output.json");
+            BaseTranslationOutputMetadataFile.WriteIfChangedAtomic(metadata,
+                BaseTranslationOutputMetadata.Create([
+                    Metadata("func_80001000.cpp", 0x80001000u, source),
+                    Metadata("func_80002000.cpp", 0x80002000u, unchanged)
+                ], TranslationQualityMetadata.Clean, "identity"));
+            var resolved = Path.Combine(root, "resolved.json");
+            Write(resolved, """
+                {"Entries":[
+                  {"Address":2147487744,"Symbol":"func_80001000","Name":"func_80001000","Kind":"base","Priority":0,"DirectCallAvailable":true,"PreservesNonvolatileFprs":true,"NonvolatileFprWriteMask":0,"MustRemainDynamicallyDispatchable":false}
+                ]}
+                """);
+            TranslatedBuildShardEmitter.Emit(new TranslatedBuildShardOptions(
+                metadata, functions, output, native, resolved,
+                BaseShardCount: 1, ModShardCount: 1, RegistrationShardCount: 1));
+            foreach (var directory in new[] { "base_dispatch", "retro_rewind_dispatch" })
+            {
+                var dispatch = Directory.GetFiles(Path.Combine(output, directory), "*.cpp")
+                    .Select(File.ReadAllText).Aggregate(string.Concat);
+                Assert.DoesNotContain("{0x80001000u, &func_80001000", dispatch);
+            }
+            // Retain the original body: the native extension calls it first.
+            var bodies = Directory.GetFiles(Path.Combine(output, "base_common"), "*.cpp")
+                .Select(File.ReadAllText).Aggregate(string.Concat);
+            Assert.Contains("void func_80001000", bodies);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void RemainingWeightPartitionDoesNotCreateOversizedTailBin()
     {
         var weights = Enumerable.Repeat(300L, 10).ToArray();

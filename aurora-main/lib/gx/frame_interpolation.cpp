@@ -726,6 +726,10 @@ float snapshot_match_distance_squared(const FrameTransformEntry& previousEntry,
 }
 
 void set_frame_interpolation_fps(uint32_t targetFps) noexcept {
+#ifdef __ANDROID__
+  // Standalone Quest only presents native game frames; synthetic replay is unsupported.
+  targetFps = 0;
+#endif
   if (targetFps != 120 && targetFps != 180 && targetFps != 240) {
     targetFps = 0;
   }

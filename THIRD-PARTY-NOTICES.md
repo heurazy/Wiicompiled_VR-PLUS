@@ -250,6 +250,16 @@ Not redistributed in any release artifact.
 
 ## Reference material
 
+The migrated menu and controller tutorial also use:
+
+- CircuitLord's [BigWalkVRInstaller](https://github.com/CircuitLord/BigWalkVRInstaller): controller
+  callout placement adapted for the native stereo renderer. See [the MIT notice](licenses/BigWalkVR-MIT.txt).
+- Valve's OpenVR C API header, obtained from SDL's vendored OpenVR SDK. Its BSD notice is retained
+  in `runtime/include/vr/openvr_capi.h`. SteamVR supplies controller model assets at runtime; they
+  are not included in this repository.
+- **Dielectric by @XorDev**, adapted for the spatial menu environment. Source and attribution
+  details are recorded in [licenses/Dielectric-menu-background.md](licenses/Dielectric-menu-background.md).
+
 Not code, but the documentation this project depends on:
 
 - [WiiBrew](https://wiibrew.org/wiki/) - Wii hardware and IOS documentation.

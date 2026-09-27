@@ -10,6 +10,8 @@
 #endif
 
 #include "vr/openxr_input.h"
+#include "vr/openxr_controller_profiles.h"
+#include "vr/mkw_vr_policy.h"
 #include "physical_wheel.h"
 #include "runtime_config.h"
 #include "settings_overlay.h"
@@ -319,16 +321,30 @@ bool OpenXRInput::CreateActions() {
             return false;
         }
     }
+    // Separate left-hand actions avoid old SteamVR game bindings which may
+    // have mapped the shared A/X or B/Y action only to the right controller.
+    for (const Spec& spec : std::array<Spec,2>{{
+        {&m_options_x,"vr_options_x","VR options X",XR_ACTION_TYPE_BOOLEAN_INPUT},
+        {&m_options_y,"vr_options_y","VR options Y",XR_ACTION_TYPE_BOOLEAN_INPUT}}}) {
+        XrActionCreateInfo info{XR_TYPE_ACTION_CREATE_INFO};
+        info.actionType=spec.type;
+        std::strncpy(info.actionName,spec.name,XR_MAX_ACTION_NAME_SIZE-1);
+        std::strncpy(info.localizedActionName,spec.localized,XR_MAX_LOCALIZED_ACTION_NAME_SIZE-1);
+        info.countSubactionPaths=1;info.subactionPaths=m_hand_paths;
+        if(!Check(xrCreateAction(m_action_set,&info,spec.action),spec.name)) return false;
+    }
     return true;
 }
 
 bool OpenXRInput::SuggestBindings() {
+    bool accepted=false;
     const auto suggest = [&](const char* profile, const std::vector<Binding>& bindings, bool required) {
         XrPath profile_path = XR_NULL_PATH;
         if (!Check(xrStringToPath(m_runtime->Instance(), profile, &profile_path), profile)) {
             return false;
         }
         std::vector<XrActionSuggestedBinding> suggested;
+        if(std::string_view(profile)=="/interaction_profiles/htc/vive_controller") m_vive_profile=profile_path;
         suggested.reserve(bindings.size());
         for (const Binding& binding : bindings) {
             XrPath path = XR_NULL_PATH;
@@ -336,6 +352,10 @@ bool OpenXRInput::SuggestBindings() {
                 continue;
             }
             suggested.push_back({*binding.action, path});
+            if(std::string_view(binding.path).find("/left/")!=std::string_view::npos) {
+                if(binding.action==&m_button_primary) suggested.push_back({m_options_x,path});
+                if(binding.action==&m_button_secondary) suggested.push_back({m_options_y,path});
+            }
         }
         XrInteractionProfileSuggestedBinding info{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
         info.interactionProfile = profile_path;
@@ -352,7 +372,9 @@ bool OpenXRInput::SuggestBindings() {
                 return false;
             }
             Log(OpenXRLogLevel::Warning, message.str());
+            return false;
         }
+        accepted=true;
         return true;
     };
 
@@ -378,8 +400,39 @@ bool OpenXRInput::SuggestBindings() {
         {&m_haptic, "/user/hand/left/output/haptic"},
         {&m_haptic, "/user/hand/right/output/haptic"},
     };
-    if (!suggest("/interaction_profiles/oculus/touch_controller", touch, true)) {
-        return false;
+    suggest("/interaction_profiles/oculus/touch_controller", touch, false);
+    // The port's advertised controller families. Paths are explicit; rejected
+    // optional profiles do not prevent another runtime's bindings from loading.
+    for (const auto& profile : kOpenXRControllerProfiles) {
+        const auto id=profile.interaction_profile;
+        if(id=="/interaction_profiles/oculus/touch_controller" || id=="/interaction_profiles/khr/simple_controller") continue;
+        auto bindings=touch;
+        for(auto& binding:bindings) {
+            const bool left=std::string(binding.path).find("/left/")!=std::string::npos;
+            if(binding.action==&m_thumbstick) binding.path=(left?profile.actions.steering:profile.actions.tricks).data();
+            if(binding.action==&m_button_primary) binding.path=(left?profile.actions.trick:profile.actions.confirm).data();
+            if(binding.action==&m_button_secondary) binding.path=(left?profile.actions.item[0]:profile.actions.brake).data();
+            if(binding.action==&m_thumbstick_click && !left) binding.path=profile.camera_click.data();
+            if(binding.action==&m_trigger && !left) binding.path=profile.actions.accelerate.data();
+            if(binding.action==&m_squeeze) {
+                if(id.find("index")!=std::string_view::npos) binding.path=left?"/user/hand/left/input/squeeze/value":"/user/hand/right/input/squeeze/value";
+                else if(id.find("motion")!=std::string_view::npos || id.find("odyssey")!=std::string_view::npos || id=="/interaction_profiles/htc/vive_controller")
+                    binding.path=left?"/user/hand/left/input/squeeze/click":"/user/hand/right/input/squeeze/click";
+            }
+            if(binding.action==&m_menu) binding.path=id.find("index")!=std::string_view::npos?nullptr:profile.actions.pause[0].data();
+            const bool wand=id=="/interaction_profiles/htc/vive_controller";
+            const bool motion=id.find("motion")!=std::string_view::npos || id.find("odyssey")!=std::string_view::npos;
+            if(wand || motion) {
+                // These controllers have no X/Y/A/B cluster. Keep left/right
+                // actions on their own hand and avoid unsupported Touch paths.
+                if(binding.action==&m_button_primary && left) binding.path="/user/hand/left/input/menu/click";
+                if(binding.action==&m_button_secondary && left) binding.path="/user/hand/left/input/trackpad/click";
+                if(binding.action==&m_button_primary && !left && motion) binding.path="/user/hand/right/input/trackpad/click";
+                if(binding.action==&m_thumbstick_click) binding.path=left?nullptr:(wand?"/user/hand/right/input/trackpad/click":"/user/hand/right/input/thumbstick/click");
+            }
+        }
+        bindings.erase(std::remove_if(bindings.begin(),bindings.end(),[](const Binding& b){return !b.path || !b.path[0];}),bindings.end());
+        suggest(id.data(),bindings,false);
     }
     // Minimal fallback so an unfamiliar runtime still offers a select, a menu
     // and something to point with.
@@ -395,7 +448,8 @@ bool OpenXRInput::SuggestBindings() {
         {&m_haptic, "/user/hand/right/output/haptic"},
     };
     suggest("/interaction_profiles/khr/simple_controller", simple, false);
-    return true;
+    if(!accepted) m_last_error="No supported controller interaction profile could be bound.";
+    return accepted;
 }
 
 void OpenXRInput::CreatePoseSpaces() {
@@ -552,6 +606,8 @@ void OpenXRInput::Destroy() {
     }
     m_thumbstick = m_thumbstick_click = m_trigger = m_squeeze = XR_NULL_HANDLE;
     m_button_primary = m_button_secondary = m_menu = m_haptic = XR_NULL_HANDLE;
+    m_options_x = m_options_y = XR_NULL_HANDLE;
+    m_options_previous=0;
     m_aim_pose = m_grip_pose = XR_NULL_HANDLE;
     m_hand_paths[0] = m_hand_paths[1] = XR_NULL_PATH;
     m_convert_now_to_xr_time = nullptr;
@@ -560,6 +616,8 @@ void OpenXRInput::Destroy() {
     }
     m_pointer.Reset();
     m_horizon = {1.0f, 0.0f};
+    OpenXRPublishUiSnapshot({});
+    OpenXRPublishPortControls({});
     m_panel_controls.Reset();
     m_last_input_time = 0;
     m_panel_select_held = false;
@@ -576,6 +634,7 @@ void OpenXRInput::Idle() {
     }
     m_pointer.Reset();
     m_horizon = {1.0f, 0.0f};
+    OpenXRPublishPortControls({});
     OpenXRPublishWiiRemote(m_joystick_id, OpenXRWiiRemoteSample{});
     // The panel stays as it was; only what the controllers were holding is forgotten.
     m_panel_controls.Reset();
@@ -664,6 +723,22 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
         inputs.stick_y = stick.y;
     }
 
+    OpenXRUiSnapshot ui{}; ui.active=true; ui.buttons=hands;
+    const auto locate=[&](XrSpace space, UiHandPose& out) {
+        if (space==XR_NULL_HANDLE) return;
+        XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
+        const auto valid=XR_SPACE_LOCATION_POSITION_VALID_BIT|XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if (XR_FAILED(xrLocateSpace(space,m_runtime->AppSpace(),predicted_display_time,&location)) ||
+            (location.locationFlags&valid)!=valid) return;
+        const auto& q=location.pose.orientation; const auto& p=location.pose.position;
+        out.valid=true; out.position={p.x,p.y,p.z};
+        out.right=RotateUiVector(q.x,q.y,q.z,q.w,{1,0,0});
+        out.up=RotateUiVector(q.x,q.y,q.z,q.w,{0,1,0});
+        out.forward=RotateUiVector(q.x,q.y,q.z,q.w,{0,0,-1});
+    };
+    for(int hand=0;hand<2;++hand) { locate(m_grip_spaces[hand],ui.hands[hand]); locate(m_aim_spaces[hand],ui.aims[hand]); }
+    OpenXRPublishUiSnapshot(ui);
+
     PollInjection();
     if (Injected("up")) {
         hands[0].stick_y = 1.0f;
@@ -682,8 +757,30 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
             : 0.0f;
     m_last_input_time = input_time;
     std::array<wii_remote::HandInputs, kHands> panel_hands = hands;
+    panel_hands[0].primary |= boolean(m_options_x,0);
+    panel_hands[0].secondary |= boolean(m_options_y,0);
+    const auto physical=m_runtime->RuntimeInfo().runtime_name.find("SteamVR")!=std::string::npos ?
+        OpenXRReadPhysicalOptionsButtons() : PhysicalOptionsButtons{};
+    if(physical.valid) {
+        panel_hands[0].primary |= physical.x;
+        panel_hands[0].secondary |= physical.y;
+    }
+    if(physical.valid!=m_native_options_valid) {
+        m_native_options_valid=physical.valid;
+        Log(OpenXRLogLevel::Info,physical.valid ? "VR options: native SteamVR face buttons available" :
+            "VR options: native SteamVR face buttons unavailable; using OpenXR actions");
+    }
+    const uint8_t options=(panel_hands[0].primary?1:0)|(panel_hands[0].secondary?2:0);
+    if(options!=m_options_previous) {
+        m_options_previous=options;
+        Log(OpenXRLogLevel::Info,"VR options left buttons: X="+
+            std::to_string(bool(options&1))+", Y="+std::to_string(bool(options&2))+
+            ", native="+std::to_string(physical.valid)+", native-X="+std::to_string(physical.x)+
+            ", native-Y="+std::to_string(physical.y));
+    }
     if (Injected("panel")) {
         // The panel button in either controller mode.
+        panel_hands[0].primary = true;
         panel_hands[0].secondary = true;
         panel_hands[0].thumbstick_click = true;
         panel_hands[1].thumbstick_click = true;
@@ -693,13 +790,16 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
     }
     // The game thread may open or close the panel too; only a change made here
     // is written back.
-    const bool was_open = OpenXRSettingsPanelOpen();
+    const bool was_open = OpenXRSettingsPanelOpen() || OpenXRIntroductionActive();
     bool open = was_open;
-    const settings_panel::Frame panel =
+    settings_panel::Frame panel =
         m_panel_controls.Update(panel_hands, open, dt_seconds, OpenXRGetControllerMode());
+    if (OpenXRIntroductionActive()) { panel.open=true; panel.withheld=true; }
     // Pointer first: the game thread reads it as soon as it sees the panel open.
     PublishSettingsPanel(input_time, settings_panel, panel);
+    if (OpenXRIntroductionActive()) open = true;
     if (open != was_open) {
+        Log(OpenXRLogLevel::Info, open ? "VR settings opened with controller chord" : "VR settings closed with controller chord");
         OpenXRSetSettingsPanelOpen(open);
     }
 
@@ -718,6 +818,52 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
     // steers through the left stick and keeps its grips from the game.
     UpdateDriving(predicted_display_time, seat, hands, panel.withheld);
 
+    QuestInput port{};
+    port.active=true;
+    if (screen.valid) {
+        const auto& q=screen.pose.orientation;
+        const auto local=[&](const UiHandPose& aim) {
+            UiHandPose ray=aim;
+            const auto& p=screen.pose.position;
+            ray.position=RotateUiVector(-q.x,-q.y,-q.z,q.w,
+                {aim.position[0]-p.x,aim.position[1]-p.y,aim.position[2]-p.z});
+            ray.position[2]-=RuntimeConfigFile::VrHudDistanceMeters();
+            ray.forward=RotateUiVector(-q.x,-q.y,-q.z,q.w,aim.forward);
+            return ray;
+        };
+        port.ui_pointer=local(ui.aims[1]);port.ui_left_pointer=local(ui.aims[0]);
+        port.ui_aspect=screen.half_height_meters>0 ? screen.half_width_meters/screen.half_height_meters : 16.f/9.f;
+    }
+    port.steamvr=m_runtime->RuntimeInfo().runtime_name.find("SteamVR")!=std::string::npos;
+    port.cockpit_controls=MkwVRGetCameraMode()==CameraMode::FirstPerson && MkwVRPolicyGetSnapshot().scene.mode==VRSceneMode::Race;
+    port.raw_steering_x=ui.buttons[0].stick_x;port.raw_steering_y=ui.buttons[0].stick_y;
+    port.steering_x=hands[0].stick_x;port.steering_y=hands[0].stick_y;
+    port.tricks_x=hands[1].stick_x;port.tricks_y=hands[1].stick_y;
+    port.accelerate=hands[1].trigger;port.reverse=hands[0].trigger>.5f;
+    port.confirm=hands[1].primary;port.brake=hands[1].secondary;
+    XrInteractionProfileState rightProfile{XR_TYPE_INTERACTION_PROFILE_STATE};
+    if(port.cockpit_controls && m_vive_profile!=XR_NULL_PATH &&
+       XR_SUCCEEDED(xrGetCurrentInteractionProfile(m_runtime->Session(),m_hand_paths[1],&rightProfile)) &&
+       rightProfile.interactionProfile==m_vive_profile) {
+        // Vive wands have no face-button cluster. Right Menu drifts in the
+        // cockpit; the left trigger remains the brake/reverse control.
+        port.confirm=hands[1].secondary;port.brake=false;
+    }
+    port.item=hands[0].secondary?1.f:0.f;port.trick=hands[0].primary;
+    port.drift=ui.buttons[1].squeeze;
+    port.wheel_active=m_driving.held[0]||m_driving.held[1];
+    port.wheel_steering=m_driving.steering_input;
+    const auto pause=m_trick_pause.Update(port.active && !panel.withheld,port.trick,
+                                         hands[0].secondary,predicted_display_time);
+    if(port.steamvr) {
+        port.trick=pause.trick;
+        if(pause.pause && !panel.withheld) OpenXRRequestTutorialPause();
+    } else port.pause=hands[0].menu;
+    if(panel.withheld) {
+        const auto rawX=port.raw_steering_x,rawY=port.raw_steering_y;
+        port=QuestInput{.active=true};port.raw_steering_x=rawX;port.raw_steering_y=rawY;
+    }
+    OpenXRPublishPortControls(port);
     // While the panel has the controllers, the game sees them idle.
     static const std::array<wii_remote::HandInputs, kHands> kIdleHands{};
     const auto& game_hands = panel.withheld ? kIdleHands : hands;

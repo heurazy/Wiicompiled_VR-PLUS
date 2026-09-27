@@ -9,6 +9,14 @@ Nintendo code, game assets, a translated game executable, or a ROM. You must pro
 clean PAL `RMCP01` disc image and compile the game locally.
 
 [Download the latest release](https://github.com/heurazy/mario-kart-wii-VR-port/releases/latest)
+## OpenXR integration
+
+The fusion now includes the original controls and SteamVR shortcuts, Index/Vive/WMR/PICO
+profiles, stick calibration, opt-in adaptive resolution, the legacy Bluetooth scan fix,
+license renaming without a NAND Mii, and full Wheel Wizard + portable packaging.
+See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md) for exact bindings,
+upgrade behavior and the remaining hardware validation.
+
 ## Roadmap
 - automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
 - sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
@@ -233,6 +241,10 @@ See [OPENXR.md](OPENXR.md) for the implementation details, configuration keys, c
 and validation notes.
 
 ## Credits
+
+- **[WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles)** for the
+  textured Touch Plus controller meshes and button animation transforms used by the Quest
+  standalone version. See [asset provenance and MIT license](runtime/assets/quest_touch_plus/SOURCE.md).
 - **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **iChris4**: 
   This project originated as a fork of iChris4's pioneering OpenXR VR port of WiiCompiled. 
   The core OpenXR integration, stereo rendering pipeline, and initial VR translation hooks 

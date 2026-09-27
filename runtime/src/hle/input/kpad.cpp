@@ -7,6 +7,11 @@
 #include <cmath>
 #include <cstdint>
 
+#include "vr_menu_pointer.inl"
+REGISTER_NATIVE_FUNCTION_AS(0x805201B0, VrMenuControllerUpdate, "VR menu controller update");
+REGISTER_NATIVE_FUNCTION_AS(0x8052281C, VrMenuPointerEnabled, "VR menu pointer capability");
+REGISTER_NATIVE_FUNCTION_AS(0x8052286C, VrMenuControllerType, "VR menu pointer controller type");
+
 // KPAD HLE fed by a real Bluetooth Wii Remote, or by VR controllers standing in
 // for one. The game calls KPADRead once per frame with room for 16 KPADStatus
 // entries and only looks at entry 0; with a Classic Controller it also calls

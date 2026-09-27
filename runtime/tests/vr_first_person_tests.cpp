@@ -359,6 +359,18 @@ void TestSafeMotionFilter() {
 } // namespace
 
 int main() {
+    {
+        const Mtx34 identity{1,0,0,0, 0,1,0,0, 0,0,1,0};
+        Mtx34 overview{};
+        Check(mkw::vr::ComputeKartDioramaAnchor(identity, identity, 1200, 900, overview),
+              "diorama anchor is valid");
+        CheckNear(overview[7], 0, "diorama keeps the kart vertically centered");
+        CheckNear(overview[11], -1500, "diorama distance includes elevation");
+        CheckNear(overview[5], .8f, "diorama looks down at the kart");
+        CheckNear(overview[9], .6f, "diorama keeps a stable upward axis");
+        Check(!mkw::vr::ComputeKartDioramaAnchor(identity, identity, 0, 900, overview),
+              "diorama rejects zero distance");
+    }
     TestNeutralInputsProduceIdentity();
     TestLevelCameraGivesPureTranslation();
     TestLevellingRemovesCameraPitch();

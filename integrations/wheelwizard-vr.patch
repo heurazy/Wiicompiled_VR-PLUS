@@ -1,6 +1,50 @@
+diff --git a/WheelWizard.Test/Features/Recomp/LicenseNameSaveTests.cs b/WheelWizard.Test/Features/Recomp/LicenseNameSaveTests.cs
+new file mode 100644
+index 0000000..3461193
+--- /dev/null
++++ b/WheelWizard.Test/Features/Recomp/LicenseNameSaveTests.cs
+@@ -0,0 +1,38 @@
++using System.Text;
++using WheelWizard.WiiManagement.GameLicense;
++
++namespace WheelWizard.Test.Features.Recomp;
++
++public sealed class LicenseNameSaveTests
++{
++    [Theory]
++    [InlineData(0)]
++    [InlineData(1)]
++    [InlineData(2)]
++    [InlineData(3)]
++    public void RenameWithoutNandChangesOnlyUtf16Name(int slot)
++    {
++        var save = new byte[0x2BC000];
++        Array.Fill(save, (byte)0x65);
++        var offset = 8 + slot * 0x8CC0;
++        "RKPD"u8.CopyTo(save.AsSpan(offset));
++        var before = (byte[])save.Clone();
++        Assert.True(LicenseNameSave.Write(save, slot, "VR Player"));
++        Assert.Equal("VR Player", Encoding.BigEndianUnicode.GetString(save, offset + 0x14, 20).TrimEnd('\0'));
++        Assert.Equal(before[..(offset + 0x14)], save[..(offset + 0x14)]);
++        Assert.Equal(before[(offset + 0x28)..], save[(offset + 0x28)..]);
++    }
++
++    [Fact]
++    public void EmptySlotAndInvalidNamesLeaveSaveUntouched()
++    {
++        var save = new byte[0x2BC000];
++        Assert.False(LicenseNameSave.Write(save, 0, "Player"));
++        "RKPD"u8.CopyTo(save.AsSpan(8));
++        var before = (byte[])save.Clone();
++        Assert.False(LicenseNameSave.Write(save, 0, " "));
++        Assert.False(LicenseNameSave.Write(save, 0, "Long Player Name"));
++        Assert.False(LicenseNameSave.Write(save, 4, "Player"));
++        Assert.Equal(before, save);
++    }
++}
 diff --git a/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs b/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs
 new file mode 100644
-index 00000000..5bede2bc
+index 0000000..5bede2b
 --- /dev/null
 +++ b/WheelWizard.Test/Features/Recomp/LocalVrLaunchDiagnosticsTests.cs
 @@ -0,0 +1,28 @@
@@ -34,7 +78,7 @@ index 00000000..5bede2bc
 +}
 diff --git a/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs b/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs
 new file mode 100644
-index 00000000..8c613126
+index 0000000..8c61312
 --- /dev/null
 +++ b/WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs
 @@ -0,0 +1,89 @@
@@ -128,7 +172,7 @@ index 00000000..8c613126
 +    }
 +}
 diff --git a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
-index f934e22d..0be00e64 100644
+index f934e22..0be00e6 100644
 --- a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
 +++ b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
 @@ -24,6 +24,12 @@ public class AutoUpdaterSingletonService(
@@ -199,7 +243,7 @@ index f934e22d..0be00e64 100644
      {
          var releasesResult = await gitHubService.GetReleasesAsync();
 diff --git a/WheelWizard/Features/CustomDistributions/RetroRewind.cs b/WheelWizard/Features/CustomDistributions/RetroRewind.cs
-index f030f642..badd1004 100644
+index f030f64..badd100 100644
 --- a/WheelWizard/Features/CustomDistributions/RetroRewind.cs
 +++ b/WheelWizard/Features/CustomDistributions/RetroRewind.cs
 @@ -150,7 +150,12 @@ public class RetroRewind : IDistribution
@@ -217,7 +261,7 @@ index f030f642..badd1004 100644
          }
          catch (Exception e)
 diff --git a/WheelWizard/Features/Recomp/RecompInstallService.cs b/WheelWizard/Features/Recomp/RecompInstallService.cs
-index fc9cb894..f70cef64 100644
+index fc9cb89..f70cef6 100644
 --- a/WheelWizard/Features/Recomp/RecompInstallService.cs
 +++ b/WheelWizard/Features/Recomp/RecompInstallService.cs
 @@ -193,7 +193,7 @@ public sealed class RecompInstallService : IRecompInstallService
@@ -289,7 +333,7 @@ index fc9cb894..f70cef64 100644
              return Fail(OperationAlreadyRunningMessage);
  
 diff --git a/WheelWizard/Features/Recomp/RecompLauncher.cs b/WheelWizard/Features/Recomp/RecompLauncher.cs
-index 130f004a..6770dafc 100644
+index 130f004..6770daf 100644
 --- a/WheelWizard/Features/Recomp/RecompLauncher.cs
 +++ b/WheelWizard/Features/Recomp/RecompLauncher.cs
 @@ -93,7 +93,7 @@ public class RecompLauncher(
@@ -311,7 +355,7 @@ index 130f004a..6770dafc 100644
  
      public async Task<WheelWizardStatus> GetCurrentStatus()
 diff --git a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
-index cde21dc5..2cde3a18 100644
+index cde21dc..2cde3a1 100644
 --- a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
 +++ b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
 @@ -13,12 +13,12 @@ public static class RecompReleaseResolver
@@ -330,7 +374,7 @@ index cde21dc5..2cde3a18 100644
      /// <summary>
      /// Returns the newest usable release, or <see langword="null"/> when the listing contains none.
 diff --git a/WheelWizard/Features/Settings/SettingsManager.cs b/WheelWizard/Features/Settings/SettingsManager.cs
-index ce6b1b1d..7d0a8d5c 100644
+index ce6b1b1..7d0a8d5 100644
 --- a/WheelWizard/Features/Settings/SettingsManager.cs
 +++ b/WheelWizard/Features/Settings/SettingsManager.cs
 @@ -283,7 +283,8 @@ public class SettingsManager : ISettingsManager
@@ -359,10 +403,95 @@ index ce6b1b1d..7d0a8d5c 100644
  
              return Ok(new SettingsValidationReport(issues));
 diff --git a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
-index 9bcbfb25..f4e2d5a8 100644
+index 9bcbfb2..eee31bf 100644
 --- a/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
 +++ b/WheelWizard/Features/WiiManagement/GameLicense/GameLicenseService.cs
-@@ -756,6 +756,8 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+@@ -319,7 +319,12 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+ 
+         var rawMiiResult = _miiService.GetByAvatarId(avatarId);
+         if (rawMiiResult.IsFailure)
+-            return new FormatException("Failed to parse mii data: " + rawMiiResult.Error.Message);
++        {
++            // A VR save can have a real license but no NAND Mii database.
++            // This is a display fallback only: preserve all identity fields.
++            var name = MiiName.Create(licenseName);
++            return new Mii { Name = name.IsSuccess ? name.Value : new MiiName("no name") };
++        }
+ 
+         return rawMiiResult.Value;
+     }
+@@ -688,14 +693,11 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+         if (userIndex is < 0 or >= MaxPlayerNum)
+             return Fail("Invalid license index. Please select a valid license.");
+ 
++        if (WheelWizard.Services.Launcher.LocalVrLauncher.IsBusy)
++            return Fail("Close the VR game before editing licenses or friends.");
++        if (!LicenseNameSave.HasLicense(_rksysData, userIndex))
++            return Fail("Select an existing license first.");
+         var user = Licenses.Users[userIndex];
+-        var miiIsEmptyOrNoName = IsNoNameOrEmptyMii(user);
+-
+-        if (miiIsEmptyOrNoName)
+-            return Fail("This license has no Mii data or is incomplete.\n" + "Please use the Mii Channel to create a Mii first.");
+-
+-        if (user.Mii == null)
+-            return Fail("This license has no Mii data or is incomplete.\n" + "Please use the Mii Channel to create a Mii first.");
+ 
+         newName = Regex.Replace(newName, @"\s+", " ");
+ 
+@@ -709,16 +711,30 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+         if (nameResult.IsFailure)
+             return nameResult.Error;
+ 
+-        user.Mii.Name = nameResult.Value;
++        var original = (byte[])_rksysData!.Clone();
+         var nameWrite = WriteLicenseNameToSaveData(userIndex, newName);
+         if (nameWrite.IsFailure)
+             return nameWrite.Error;
+-        var updated = _miiService.UpdateName(user.Mii.MiiId, newName);
+-        if (updated.IsFailure)
+-            return updated.Error;
+-        var rksysSaveResult = SaveRksysToFile();
+-        if (rksysSaveResult.IsFailure)
+-            return rksysSaveResult.Error;
++        var saved = SaveRksysToFile();
++        if (saved.IsFailure)
++        {
++            _rksysData = original;
++            return saved.Error;
++        }
++        var avatarId = BigEndianBinaryHelper.BufferToUint32(_rksysData, 8 + userIndex * RkpdSize + 0x28);
++        var nandMii = _miiService.GetByAvatarId(avatarId);
++        if (nandMii.IsSuccess)
++        {
++            var updated = _miiService.UpdateName(avatarId, newName);
++            if (updated.IsFailure)
++            {
++                _rksysData = original;
++                var rollback = SaveRksysToFile();
++                return rollback.IsFailure ? rollback.Error : updated.Error;
++            }
++        }
++        user.Mii ??= new Mii();
++        user.Mii.Name = nameResult.Value;
+ 
+         return Ok();
+     }
+@@ -743,19 +759,13 @@ public class GameLicenseSingletonService : RepeatedTaskManager, IGameLicenseSing
+ 
+     private OperationResult WriteLicenseNameToSaveData(int userIndex, string newName)
+     {
+-        if (_rksysData == null || _rksysData.Length < RksysSize)
+-            return Fail("Invalid save data");
+-        var rkpdOffset = 0x8 + userIndex * RkpdSize;
+-        var nameOffset = rkpdOffset + 0x14;
+-        var nameBytes = Encoding.BigEndianUnicode.GetBytes(newName);
+-        for (var i = 0; i < 20; i++)
+-            _rksysData[nameOffset + i] = 0;
+-        Array.Copy(nameBytes, 0, _rksysData, nameOffset, Math.Min(nameBytes.Length, 20));
+-        return Ok();
++        return LicenseNameSave.Write(_rksysData, userIndex, newName) ? Ok() : Fail("Invalid license or name");
+     }
  
      private OperationResult SaveRksysToFile()
      {
@@ -371,8 +500,38 @@ index 9bcbfb25..f4e2d5a8 100644
          if (_rksysData == null || !_settingsManager.PathsSetupCorrectly())
              return Fail("Invalid save data or config is not setup properly.");
          FixRksysCrc(_rksysData);
+diff --git a/WheelWizard/Features/WiiManagement/GameLicense/LicenseNameSave.cs b/WheelWizard/Features/WiiManagement/GameLicense/LicenseNameSave.cs
+new file mode 100644
+index 0000000..e52dd0a
+--- /dev/null
++++ b/WheelWizard/Features/WiiManagement/GameLicense/LicenseNameSave.cs
+@@ -0,0 +1,24 @@
++using System.Text;
++
++namespace WheelWizard.WiiManagement.GameLicense;
++
++/// <summary>Edits only the name of an existing RKPD slot; never creates a Mii or a license.</summary>
++public static class LicenseNameSave
++{
++    public static bool HasLicense(byte[]? save, int slot)
++    {
++        if (save is null || save.Length < 0x2BC000 || slot is < 0 or > 3)
++            return false;
++        return save.AsSpan(8 + slot * 0x8CC0, 4).SequenceEqual("RKPD"u8);
++    }
++
++    public static bool Write(byte[]? save, int slot, string name)
++    {
++        if (!HasLicense(save, slot) || string.IsNullOrWhiteSpace(name) || name.Length is < 3 or > 10)
++            return false;
++        var destination = save!.AsSpan(8 + slot * 0x8CC0 + 0x14, 20);
++        destination.Clear();
++        Encoding.BigEndianUnicode.GetBytes(name.AsSpan(), destination);
++        return true;
++    }
++}
 diff --git a/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs b/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
-index fa102783..e1445b21 100644
+index fa10278..e1445b2 100644
 --- a/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
 +++ b/WheelWizard/Features/WiiManagement/MiiManagement/MiiRepositoryService.cs
 @@ -68,6 +68,8 @@ public class MiiRepositoryServiceService(
@@ -403,7 +562,7 @@ index fa102783..e1445b21 100644
          if (fileSystem.File.Exists(databasePath))
              return Fail("Database already exists.", MessageTranslation.Error_MiiDBAlreadyExists);
 diff --git a/WheelWizard/Program.cs b/WheelWizard/Program.cs
-index bcbc5351..e9ae752a 100644
+index bcbc535..e9ae752 100644
 --- a/WheelWizard/Program.cs
 +++ b/WheelWizard/Program.cs
 @@ -16,6 +16,29 @@ public class Program : IDesignerEntryPoint
@@ -437,7 +596,7 @@ index bcbc5351..e9ae752a 100644
          SetupWorkingDirectory();
  
 diff --git a/WheelWizard/Services/Launcher/LauncherProvider.cs b/WheelWizard/Services/Launcher/LauncherProvider.cs
-index 3c264b79..1aabae64 100644
+index 3c264b7..1aabae6 100644
 --- a/WheelWizard/Services/Launcher/LauncherProvider.cs
 +++ b/WheelWizard/Services/Launcher/LauncherProvider.cs
 @@ -16,7 +16,7 @@ public interface ILauncherProvider
@@ -453,7 +612,7 @@ index 3c264b79..1aabae64 100644
  }
 diff --git a/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs b/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs
 new file mode 100644
-index 00000000..bd80bd25
+index 0000000..bd80bd2
 --- /dev/null
 +++ b/WheelWizard/Services/Launcher/LocalVrLaunchDiagnostics.cs
 @@ -0,0 +1,40 @@
@@ -499,11 +658,13 @@ index 00000000..bd80bd25
 +}
 diff --git a/WheelWizard/Services/Launcher/LocalVrLauncher.cs b/WheelWizard/Services/Launcher/LocalVrLauncher.cs
 new file mode 100644
-index 00000000..f641d2a2
+index 0000000..29c58c7
 --- /dev/null
 +++ b/WheelWizard/Services/Launcher/LocalVrLauncher.cs
-@@ -0,0 +1,144 @@
+@@ -0,0 +1,179 @@
 +using System.Diagnostics;
++using System.Security.Cryptography;
++using System.Text.Json;
 +using WheelWizard.Models.Enums;
 +using WheelWizard.Mods;
 +using WheelWizard.Recomp;
@@ -555,11 +716,22 @@ index 00000000..f641d2a2
 +    private RecompLauncher Retro => App.Services.GetRequiredService<RecompLauncher>();
 +    public string GameTitle => title;
 +
++    // A local developer bundle has already-built games, not an installed host.
++    // The explicit manifest authenticates those products; release bundles still
++    // use the complete setup reconciliation path below.
++    private string TestManifest => Path.Combine(BundleRoot, "vr-local-test.json");
++    private bool IsTestBundle => IsLocalBundle && File.Exists(TestManifest);
++    private string TestExecutable => Path.Combine(RuntimeDirectory, executableRelativePath);
++
 +    public static LocalVrLauncher CreateRetro() =>
 +        new("Retro Rewind VR", Path.Combine("RetroRewind", "RetroRewind.exe"), App.Services.GetRequiredService<IModsLaunchService>());
 +
 +    public async Task<WheelWizardStatus> GetCurrentStatus()
 +    {
++        if (IsTestBundle)
++            return File.Exists(TestExecutable) && File.Exists(Path.Combine(RuntimeDirectory, "GameAssets", "DATA", "sys", "fst.bin"))
++                ? WheelWizardStatus.Ready
++                : WheelWizardStatus.NotInstalled;
 +        if (OperationInFlight)
 +            return WheelWizardStatus.Ready;
 +        if (IsRetro)
@@ -599,6 +771,28 @@ index 00000000..f641d2a2
 +    public Task<OperationResult> Launch() =>
 +        Guard(async () =>
 +        {
++            if (IsTestBundle)
++            {
++                using var manifest = JsonDocument.Parse(File.ReadAllText(TestManifest));
++                var key = IsRetro ? "retro_rewind" : "base";
++                var expected = manifest.RootElement.GetProperty(key).GetString();
++                using var stream = File.OpenRead(TestExecutable);
++                var actual = Convert.ToHexString(SHA256.HashData(stream));
++                if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
++                    return Fail("The local test executable does not match its build manifest.");
++                stream.Close();
++                using var game = Process.Start(
++                    new ProcessStartInfo(TestExecutable)
++                    {
++                        WorkingDirectory = Path.GetDirectoryName(TestExecutable)!,
++                        UseShellExecute = false,
++                    }
++                );
++                if (game is null)
++                    return Fail("The local VR test could not start.");
++                await game.WaitForExitAsync();
++                return game.ExitCode == 0 ? Ok() : Fail($"The local VR test exited with code {game.ExitCode}. See UserData/Logs.");
++            }
 +            if (IsRetro)
 +                return await Retro.Launch();
 +            var setup = Path.Combine(RuntimeDirectory, "WiiCompiled-Setup.exe");
@@ -649,7 +843,7 @@ index 00000000..f641d2a2
 +}
 diff --git a/WheelWizard/Services/Launcher/LocalVrPaths.cs b/WheelWizard/Services/Launcher/LocalVrPaths.cs
 new file mode 100644
-index 00000000..f4fef78b
+index 0000000..f4fef78
 --- /dev/null
 +++ b/WheelWizard/Services/Launcher/LocalVrPaths.cs
 @@ -0,0 +1,57 @@
@@ -711,7 +905,7 @@ index 00000000..f4fef78b
 +    }
 +}
 diff --git a/WheelWizard/Services/Launcher/RrLauncher.cs b/WheelWizard/Services/Launcher/RrLauncher.cs
-index bcb8d352..275bfbb5 100644
+index bcb8d35..275bfbb 100644
 --- a/WheelWizard/Services/Launcher/RrLauncher.cs
 +++ b/WheelWizard/Services/Launcher/RrLauncher.cs
 @@ -30,6 +30,8 @@ public class RrLauncher : ILauncher
@@ -724,7 +918,7 @@ index bcb8d352..275bfbb5 100644
          {
              //case SHOULD be impossible since launch button should be disabled
 diff --git a/WheelWizard/Services/PathManager.cs b/WheelWizard/Services/PathManager.cs
-index 52418fce..0aea80a6 100644
+index 52418fc..0aea80a 100644
 --- a/WheelWizard/Services/PathManager.cs
 +++ b/WheelWizard/Services/PathManager.cs
 @@ -26,13 +26,20 @@ public static class PathManager
@@ -827,7 +1021,7 @@ index 52418fce..0aea80a6 100644
              {
                  return Settings.Get<string>(Settings.NAND_ROOT_PATH);
 diff --git a/WheelWizard/Views/App.axaml.cs b/WheelWizard/Views/App.axaml.cs
-index 399fa5a2..962591ce 100644
+index 399fa5a..962591c 100644
 --- a/WheelWizard/Views/App.axaml.cs
 +++ b/WheelWizard/Views/App.axaml.cs
 @@ -156,7 +156,13 @@ public class App : Application
@@ -846,7 +1040,7 @@ index 399fa5a2..962591ce 100644
                  if (launchResult.IsFailure)
                  {
 diff --git a/WheelWizard/Views/Pages/HomePage.axaml b/WheelWizard/Views/Pages/HomePage.axaml
-index a80a85a1..77f16aa7 100644
+index a80a85a..77f16aa 100644
 --- a/WheelWizard/Views/Pages/HomePage.axaml
 +++ b/WheelWizard/Views/Pages/HomePage.axaml
 @@ -118,11 +118,11 @@
@@ -864,7 +1058,7 @@ index a80a85a1..77f16aa7 100644
          </StackPanel>
  
 diff --git a/WheelWizard/Views/Pages/HomePage.axaml.cs b/WheelWizard/Views/Pages/HomePage.axaml.cs
-index f0b7ca8f..6158c935 100644
+index f0b7ca8..6158c93 100644
 --- a/WheelWizard/Views/Pages/HomePage.axaml.cs
 +++ b/WheelWizard/Views/Pages/HomePage.axaml.cs
 @@ -36,6 +36,9 @@ public partial class HomePage : UserControlBase
@@ -895,7 +1089,7 @@ index f0b7ca8f..6158c935 100644
          else
              ApplyDolphinTrailColors();
 diff --git a/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs b/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
-index 8675e203..daad00a0 100644
+index 8675e20..daad00a 100644
 --- a/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
 +++ b/WheelWizard/Views/Pages/Settings/OtherSettings.axaml.cs
 @@ -20,7 +20,7 @@ public partial class OtherSettings : UserControlBase
@@ -933,7 +1127,7 @@ index 8675e203..daad00a0 100644
          progressWindow.Show();
          await CustomDistributionSingletonService.RetroRewind.ReinstallAsync(progressWindow);
 diff --git a/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs b/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
-index ab2c7aa9..29ddaa3b 100644
+index ab2c7aa..29ddaa3 100644
 --- a/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
 +++ b/WheelWizard/Views/Pages/Settings/RecompSettings.axaml.cs
 @@ -60,7 +60,7 @@ public partial class RecompSettings : UserControlBase

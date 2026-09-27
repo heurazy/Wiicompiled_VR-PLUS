@@ -47,7 +47,7 @@ $termuxPackages = @(
     @{ Name = 'libllvm'; File = 'pool/main/libl/libllvm/libllvm_21.1.8-3_aarch64.deb'; Sha256 = '5056a73f2645fc9c0759e6f94a1bd6edcf36305acaef58dc685211ced9cc2a02'
        License = 'Apache-2.0 WITH LLVM-exception'
        Files = @{ 'lib/libLLVM.so' = 'lib/libLLVM.so'; 'share/doc/libllvm/LICENSE.TXT' = 'licenses/llvm/LICENSE.TXT' } }
-    @{ Name = 'libc++'; File = 'pool/main/libc/libc++/libc++_29_aarch64.deb'; Sha256 = 'bb9f12113c137aa0e8513bb51cc49fe77a5ce3ca39ab9e92c57d228ecdf00222'
+    @{ Name = 'libc++'; File = 'pool/main/libc/libc++/libc++_30_aarch64.deb'; Sha256 = '53d0b84a7ba7459024257cb94d5b136fe13ef858567f65a8064b35950799f2ca'
        License = 'Apache-2.0 WITH LLVM-exception'
        Files = @{ 'lib/libc++_shared.so' = 'lib/libc++_shared.so' } }
     @{ Name = 'libffi'; File = 'pool/main/libf/libffi/libffi_3.8.0_aarch64.deb'; Sha256 = '4f255badf74cd31f6a2801c17fa1444199c84c834b517b7c843e2fe9ebe91d77'

@@ -6,6 +6,7 @@
 #if defined(MKW_ENABLE_OPENXR)
 
 #include "vr/openxr_runtime.h"
+#include "vr/reference_space_changes.h"
 #include "vr/openxr_diagnostics.h"
 
 #include <algorithm>
@@ -548,6 +549,7 @@ OpenXREventStatus OpenXRRuntime::PollEvents() {
                     ++m_reference_space_change.serial;
                 }
                 m_reference_space_change.type = space_event.referenceSpaceType;
+                m_reference_space_change.external = true;
                 m_reference_space_change.change_time = space_event.changeTime;
                 m_reference_space_change.pose_in_previous_space_valid =
                     space_event.poseValid == XR_TRUE;
@@ -865,6 +867,7 @@ bool OpenXRRuntime::ResetAppSpace(const XrPosef& pose_in_reference_space) {
         ++m_reference_space_change.serial;
     }
     m_reference_space_change.type = m_app_space_type;
+    m_reference_space_change.external = false;
     m_reference_space_change.change_time = 0;
     m_reference_space_change.pose_in_previous_space_valid = false;
     m_reference_space_change.pose_in_previous_space = IdentityPose();
@@ -872,16 +875,8 @@ bool OpenXRRuntime::ResetAppSpace(const XrPosef& pose_in_reference_space) {
     return true;
 }
 
-bool OpenXRRuntime::ConsumeAppSpaceChangesThrough(XrTime display_time) {
-    bool consumed = false;
-    std::erase_if(m_pending_app_space_changes,
-                  [&](const OpenXRReferenceSpaceChange& change) {
-                      const bool due = change.change_time == 0 ||
-                                       display_time >= change.change_time;
-                      consumed = consumed || due;
-                      return due;
-                  });
-    return consumed;
+bool OpenXRRuntime::ConsumeAppSpaceChangesThrough(XrTime display_time, bool* external) {
+    return ConsumeReferenceSpaceChanges(m_pending_app_space_changes,display_time,external);
 }
 
 void OpenXRRuntime::DestroySession() {

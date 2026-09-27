@@ -98,7 +98,7 @@ Assert-File (Join-Path $portableTools 'Ninja\ninja.exe') 'Portable Ninja'
 # to compile (launcher/Prepare-NativePrebuilt.ps1).
 # Kept in step with InstalledLayout.DependencyNames by Test-PinnedFacts.ps1: the installed host
 # refuses to call a toolkit complete unless every one of these directories is present.
-$requiredDependencies = @('abseil-cpp','cppwinrt','dawn_prebuilt','fmt','freetype','imgui','libusb','native_prebuilt','openxr','png','SDL','sqlite3','tracy','xxhash','zlib','zstd')
+$requiredDependencies = @('abseil-cpp','cppwinrt','dawn_prebuilt','fmt','freetype','imgui','libusb','native_prebuilt','vulkan_headers','openxr','png','SDL','sqlite3','tracy','xxhash','zlib','zstd')
 $missingSources = @($requiredDependencies | Where-Object { $_ -ne 'native_prebuilt' } |
     Where-Object { -not (Test-Path -LiteralPath (Join-Path $dependencySources $_) -PathType Container) })
 if ($missingSources.Count -gt 0) {
@@ -156,6 +156,7 @@ Reset-OutputDirectory $outputRoot
 foreach ($path in @($publish,$payloadRoot)) { [IO.Directory]::CreateDirectory($path) | Out-Null }
 
 Write-Host '[1/6] Publishing self-contained CLI host and translator...'
+& (Join-Path $PSScriptRoot 'Build-WheelWizard.ps1')
 & dotnet publish $setupProject -c Release -r win-x64 --self-contained true `
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
     -p:DebugType=None -o (Join-Path $publish 'setup')
@@ -224,6 +225,7 @@ foreach ($name in $requiredDependencies) { Copy-Directory (Join-Path $dependency
 
 [IO.Directory]::CreateDirectory((Join-Path $payloadRoot 'host')) | Out-Null
 Copy-Item $setupHost (Join-Path $payloadRoot 'host\WiiCompiled-Setup.exe')
+Copy-Item (Join-Path $PSScriptRoot 'artifacts\wheelwizard-publish') (Join-Path $payloadRoot 'WheelWizard') -Recurse
 
 Write-Host '[3/6] Writing manifests and third-party license inventory...'
 [IO.Directory]::CreateDirectory((Join-Path $payloadRoot 'licenses')) | Out-Null
@@ -281,6 +283,7 @@ foreach ($required in @('ToolkitFingerprint','TranslationFingerprint','NativeToo
 }
 
 $manifest = [ordered]@{
+    ProductId = 'wiicompiled-openxr-vr'
     SchemaVersion = 2
     ProductVersion = '0.4.0'
     ExpectedGameId = $pins.GameId
@@ -308,7 +311,7 @@ Write-Host '[4/6] Enforcing the copyright and generated-code boundary...'
 Write-Host '[5/6] Creating the canonical installer payload...'
 $payloadZip = Join-Path $workRoot 'payload.zip'
 Compress-Zip $payloadRoot $payloadZip @(
-    'Toolkit','BuildWorkspace','host','licenses','payload-manifest.json')
+    'Toolkit','BuildWorkspace','host','licenses','WheelWizard','payload-manifest.json')
 
 Write-Host '[6/6] Producing the single-file setup executable...'
 $outputSetup = Join-Path $outputRoot 'WiiCompiled-Setup.exe'

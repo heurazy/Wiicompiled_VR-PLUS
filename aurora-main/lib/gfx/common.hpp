@@ -305,6 +305,8 @@ struct StereoReplayEye {
   // The virtual screen is defined in that neutral space, so 2D reprojection
   // uses this transform directly.
   Mat3x4<float> viewFromCenter;
+  bool handHud = false;
+  Mat3x4<float> handHudViewFromPanel;
   // The same delta with the first-person scene anchor folded in, i.e. from the
   // game's *recorded* view space into this eye's. World draws carry the game's
   // camera in their position matrices and therefore need this one. It equals

@@ -85,4 +85,14 @@ LocalPlayerKartRead ReadLocalPlayerKart() noexcept {
     return read;
 }
 
+// PAL Kart::Pointers::kartStatus +4; Status::bitfield2 +0xC.
+// https://github.com/MelgMKW/Pulsar/blob/main/GameSource/MarioKartWii/Kart/KartPointers.hpp
+template <typename GuestMemory>
+bool LocalPlayerInBullet(const LocalPlayerKartRead& player) noexcept {
+    uint32_t status=0, flags=0;
+    return player.failed_step==nullptr && player.accessor!=0 &&
+        GuestMemory::TryRead32(player.accessor+4, status) && status!=0 &&
+        GuestMemory::TryRead32(status+0xC, flags) && (flags & 0x08000000u)!=0;
+}
+
 } // namespace mkw::vr::detail

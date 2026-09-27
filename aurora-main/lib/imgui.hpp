@@ -24,9 +24,11 @@ void render_frame_data() noexcept;
 void render(const wgpu::RenderPassEncoder& pass) noexcept;
 
 // The headset panel as aurora_imgui_set_stereo_overlay last set it.
+struct HostFrame;
 struct StereoOverlay {
   ImDrawData* drawData = nullptr;
   float widthFraction = 0.f;
+  std::shared_ptr<HostFrame> frame;
 };
 StereoOverlay latch_stereo_overlay() noexcept;
 // Renders another context's draw data with this context's backend. The backend keeps one projection

@@ -1,3 +1,4 @@
+#include "vr/openxr_settings_panel.h"
 #include "wii_remote_input.h"
 
 #include "runtime_config.h"
@@ -639,7 +640,7 @@ static void ReadVrControllerSample(uint32_t chan, KpadSample& sample) {
         return;
     }
     sample = {};
-    sample.hold = vr.hold;
+    sample.hold = mkw::vr::OpenXRTakeTutorialPause(true) ? mkw::vr::wii_remote::kButtonPlus : vr.hold;
     sample.hasNunchuk = true;
     for (int i = 0; i < 3; ++i) {
         sample.acc[i] = vr.acc[i];

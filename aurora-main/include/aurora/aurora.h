@@ -187,7 +187,21 @@ typedef struct {
   // everywhere else, for the host's compositor to show its own background
   // (the room, on a headset with passthrough) around it.
   bool window;
+  bool handHud;
+  float handHudViewFromPanel[2][12];
+  struct {
+    bool anchored, tracked[2], pointerTracked[2];
+    float distance, width;
+    float eyeFromPanel[2][12], panelFromGrip[2][12], pointerRay[2][6];
+  } ui;
 } AuroraStereoFrame;
+typedef struct { float position[3], color[3], uv[2]; uint32_t material; } AuroraVRControllerVertex;
+typedef struct { bool active; float headerEnd, footerStart; float labels[10][4]; } AuroraVRUiGuide;
+void aurora_set_vr_controller_model(uint32_t hand, const AuroraVRControllerVertex* triangles, uint32_t count);
+void aurora_set_vr_controller_texture(uint32_t material, uint32_t width, uint32_t height, const uint8_t* rgba);
+void aurora_set_vr_controller_anchors(uint32_t hand, const float* positions);
+void aurora_set_vr_menu_shader_quality(int quality);
+void aurora_set_vr_ui_guide(const AuroraVRUiGuide* guide);
 
 /**
  * Called on Aurora's frame worker immediately before a GX frame is sealed.

@@ -82,6 +82,7 @@ internal sealed class InstallerEngine
         payload.ExtractEntry("host/WiiCompiled-Setup.exe",
             Path.Combine(staging, ProductInfo.SetupCopyName));
         payload.ExtractDirectory("licenses", Path.Combine(staging, "licenses"));
+        payload.ExtractDirectory("WheelWizard", Path.Combine(staging, "WheelWizard"));
         payload.ExtractEntry(InstalledLayout.PayloadManifestFileName,
             Path.Combine(staging, InstalledLayout.PayloadManifestFileName));
 
@@ -289,6 +290,9 @@ internal sealed class InstallerEngine
     {
         entries.Add(InstallTransactionEntry.Directory(Path.Combine(staging, "licenses"),
             Path.Combine(installDirectory, "licenses")));
+        if (File.Exists(Path.Combine(staging, "WheelWizard", "WheelWizard.exe")))
+            entries.Add(InstallTransactionEntry.Directory(Path.Combine(staging, "WheelWizard"),
+                Path.Combine(installDirectory, "WheelWizard")));
         entries.Add(InstallTransactionEntry.File(Path.Combine(staging, ProductInfo.SetupCopyName),
             Path.Combine(installDirectory, ProductInfo.SetupCopyName)));
         entries.Add(InstallTransactionEntry.File(

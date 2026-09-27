@@ -39,7 +39,7 @@ enabled = true
 required = false
 mirror_view = "normal"
 controller_mode = "wii_remote"
-frame_interpolation_fps = 0
+frame_interpolation_fps = 1
 render_scale = 1.0
 world_units_per_meter = 500.0
 hud_distance_meters = 2.0
@@ -116,13 +116,13 @@ for 1/2/3/4/1-screen transitions with VR interpolation on and off. Actual headse
 needs visual validation for course effects, HUD layout, pause/resume, and scene transitions.
 
 **F10 > VR > VR frame interpolation (experimental)** offers **Off, Auto, 72, 90, 120** and
-applies immediately. `frame_interpolation_fps` stores `0` for Off (the default), `1` for Auto,
+applies immediately. `frame_interpolation_fps` stores `0` for Off, `1` for Auto (the default),
 or the selected rate. The earlier `frame_interpolation = true` checkbox migrates to Auto.
 Auto renders at the headset's display deadlines; the numbered choices cap the rate of new
 stereo frames. They do not change the headset's physical refresh setting. For VDXR with Virtual
 Desktop set to 90 Hz, select Auto or 90. The menu shows both the detected headset rate and the
-rate of newly rendered VR frames, excluding repeated images. Menus and other virtual-screen
-scenes continue at the game's rate; assess interpolation during an immersive race.
+rate of newly rendered VR frames, excluding repeated images. Menus also redraw the anchored screen, shader and tracked controllers at the selected
+headset rate, using the last completed game image. Menu logic still runs at the game's rate.
 
 VR interpolation is independent of **Graphics > Race frame interpolation**. The simulation,
 physics, audio and VI remain at 60 Hz. Scene motion is delayed by one game frame (about 16.7 ms)
@@ -210,7 +210,7 @@ that passes, and `[xr-diag]` reports it as a stalled, late frame with skipped di
 rescan still pauses the *game* thread for as long, so leave it off unless a real Wii Remote is in
 use.
 
-`"wii_remote"`, the default, presents them as a Wii Remote with a Nunchuk, the way DolphinXR's
+`"wii_remote"`, the optional compatibility mode, presents them as a Wii Remote with a Nunchuk, the way DolphinXR's
 OpenXR Wii Remote does, with buttons adapted from its default `OpenXR Wii Remote` profile for the
 Touch controllers. The port is served through KPAD like a Bluetooth remote
 (`wii_remote_input.cpp`), so `WPADProbe` reports a Nunchuk and the game runs its own Wii Remote + Nunchuk control scheme:
@@ -225,7 +225,7 @@ Touch controllers. The port is served through KPAD like a Bluetooth remote
 | Left menu | + |
 | Left stick | Nunchuk stick |
 | Left trigger | Z |
-| Left Y | Settings panel (not a Wii button) |
+| Left X + Y | Settings panel |
 | Either grip | Takes hold of the wheel (not a Wii button) |
 | Right stick click | First-person camera on / off (not a Wii button) |
 | Right controller motion and aim | Wii Remote accelerometer and pointer |
@@ -265,7 +265,7 @@ cursor for 100 ms before it disappears, so tracking spikes during fast motion do
 Raw IR camera dots in `KPADGetUnifiedWpadStatus` stay invalid; the game reads the pointer from
 `KPADStatus`.
 
-**Settings in the headset.** Left Y opens the settings panel described below; while it is open the
+**Settings in the headset.** Left X + Y opens the settings panel described below; while it is open the
 controllers operate the panel and the game sees them idle.
 
 **Hand steering.** With `hand_steering` on, in the first-person cockpit, a grip squeezed near the
@@ -274,22 +274,17 @@ see [Steering wheel and hand
 steering](#steering-wheel-and-hand-steering). Turning the wheel moves the controllers, and the game's
 own motion detection still reads them, so a sharp enough turn can read as a shake.
 
-`"gamepad"` keeps the controllers one ordinary gamepad read through PAD as a GameCube controller:
-A/B → South/East, X/Y → West/North, index triggers → trigger axes, grips → shoulders, thumbsticks
-→ sticks (clicks → stick buttons), left menu → Start. Every binding in the F10 controller menu
-applies. Left Y is GameCube Y here, so clicking both thumbsticks together opens the settings panel
-instead. The right thumbstick click on its own still toggles the first-person camera.
-
-Bindings are suggested for `oculus/touch_controller` (Quest 2, 3 and Pro) and
-`khr/simple_controller`. `mkw_vr_wii_remote_tests` checks the accelerometer frame, the pointer
-raycast and debounce, the picture placement and the button profile without a headset.
+`"gamepad"` is now the default and uses the original VR port's exact controls,
+including Y items, X tricks, left-trigger reverse, cockpit A drift, camera cycling
+and SteamVR's long-X pause. It uses explicit controller-family profiles and a
+calibrated PAD mapping. See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md)
+for the full bindings, alternative Vive/WMR controls and upgrade behavior.
 
 ## Settings in the headset
 
 The F10 settings bar is only visible on the desktop window, so the same settings are also offered on
 a panel inside the headset, in menus and during an immersive race alike, including on the Quest.
-**Press left Y** to open it, and again to close it (with `controller_mode = "gamepad"`, **click both
-thumbsticks together** instead); the left controller's menu button and the panel's *Close* button
+**Press left X + Y** (Index: left A + B) to open or close it; the left controller's menu button and the panel's *Close* button
 also close it. It can be opened from the desktop as well, with
 **F10 → VR → Show these settings in the headset**.
 
@@ -580,7 +575,7 @@ frame's own predicted display time. The log announces `OpenXR D3D12 pacing: rend
 `OpenXR Vulkan pacing: …` on the Vulkan binding) or
 `frame-first (VR interpolation)` on each transition. For PC testing, disable **VR** frame
 interpolation for a race capture; changing desktop interpolation alone does not select this
-path. Menus use render-first even when VR interpolation is configured for races. Compare the
+path. Menus also use frame-first retained redraw when VR interpolation is enabled. Compare the
 new diagnostic `open`, `end-gap`, `late`, and stage timings against a frame-first capture on
 the same course and settings. Shorter `open` alone does not prove fewer black frames: rendering
 and xrWaitFrame still take time outside that interval. Hardware testing is needed to measure
@@ -964,7 +959,34 @@ memory. Matching and history capture read that buffer, then the used prefix is c
 the mapped upload buffer before unmapping. The backing choice stays fixed until the batch
 ends, including mid-frame flushes, so live setting changes cannot invalidate pending tasks.
 
-## Current limitations
+## Features migrated from heurazy's original VR port
+
+- **Hand HUD:** `F10 > VR > Race HUD on left hand` places the race HUD, including the mini-map,
+  above the tracked left controller. First person keeps the forward cockpit HUD. If left-hand
+  tracking is unavailable, the forward HUD is used.
+- **Three cameras:** right-stick click cycles Original, First person and Diorama. The race opening
+  uses the original camera, then switches to the selected default. `Race camera` changes the
+  current camera; `Default camera` selects it for subsequent races. Diorama has independent
+  distance, height and world-scale sliders, with a reset button.
+- **Introduction:** the first OpenXR launch shows a pointer-operated default-camera selector.
+  First-person and other camera modes each have a one-time controller guide. The guide requests
+  Mario Kart's pause and waits for confirmation before appearing. Continuing resumes the game.
+  `Show introduction and controls again` clears the saved introduction state. These guides use
+  this fork's existing input mappings, rather than overwriting them with the old fork's controls.
+- **Menu environment:** Dielectric by @XorDev is rendered around the anchored menu with stereo
+  eye positions. `Menu shader quality` selects Off, Low, Balanced or High and applies immediately.
+  SteamVR controller models, textures, component animations and device-specific callout positions
+  are used when available; a procedural controller is the fallback on other runtimes.
+
+Settings are stored in `[vr]`: `hand_hud`, `camera_mode`, `default_camera`, `diorama_distance`,
+`diorama_height`, `diorama_units_per_meter`, `welcome_complete`, `tutorial_completed` and
+`menu_shader_quality`. Tutorial bits are 1 for Original/Diorama and 2 for First person.
+The existing `first_person` setting remains readable for older configurations.
+
+The Windows builds and nine camera, configuration, input, policy and tutorial tests pass locally.
+The new combined feature set still needs headset validation on each supported runtime.
+
+## Remaining validation
 
 - Only the project's supported PAL `RMCP01` translation has race instrumentation addresses.
 - The tracked controllers are always Player 1's Wii Remote; there is no left-handed swap, and only
@@ -989,3 +1011,34 @@ ends, including mid-frame flushes, so live setting changes cannot invalidate pen
 OpenXR diagnostics are written to the normal run log under
 `%LOCALAPPDATA%\WiiCompiled\Logs`. Search for `OpenXR` when reporting a startup or submission
 failure.
+
+## Local migration feedback fixes
+
+- Bullet Bill temporarily uses the original game camera, restores visible vehicle models,
+  and releases cockpit steering. The selected camera returns when the item finishes.
+- Menu anchors wait for focused positional tracking. Upright fallback screens ignore head
+  pitch/roll. An inverted initial reference space is repaired between OpenXR frames, before
+  locating the next eyes and controller rays. Runtime recenter events invalidate anchors
+  before computing menu pointers.
+- The native GameCube menu pointer is fed by both OpenXR aim rays; either trigger selects
+  its pointed entry. Gamepad sticks and physical A/B remain available.
+- Left X+Y (Index A+B) opens VR options, rendered into both eyes rather than a detached
+  compositor layer. Dedicated left-hand actions supplement the shared game actions,
+  so old controller bindings do not have to carry the options shortcut. Button edges
+  and the controller chord transition are recorded in the console log.
+  X+Y accepts up to 120 ms between the two button samples, including serialized
+  SteamVR presses. A recognized chord remains latched until both buttons are
+  released, preventing repeated opening/closing while it is held.
+- Runtime-rate interpolation is enabled in the local test configuration. Retained menu
+  redraw updates head/controller poses without advancing simulation beyond 60 Hz. Completed
+  mono snapshots survive presentation transitions so a consumed XR packet is submitted.
+
+The local executables pass dispatch validation and the targeted CPU tests. Initial pose,
+controller navigation and perceived presentation cadence still require testing in a headset.
+
+An external SteamVR/Virtual Desktop recenter clears the startup origin correction
+when the runtime's reference-space change takes effect. Application-created origin
+replacements only invalidate anchors; they never trigger this clearing themselves.
+This prevents a second inversion after the runtime corrects its own reference axes.
+
+VR options also open and close by clicking both thumbsticks together. On SteamVR, physical face-button states from the native controller model supplement OpenXR action states, including controller-specific button masks. Single-stick camera controls remain unchanged.

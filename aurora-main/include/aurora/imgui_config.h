@@ -1,5 +1,12 @@
 #pragma once
 
+// The host builds menus while the GPU worker renders sealed draw lists. A
+// process-global current context lets the worker pick up the VR-only context,
+// which has no renderer backend. Each thread must select its own context.
+struct ImGuiContext;
+extern thread_local ImGuiContext* AuroraImGuiContext;
+#define GImGui AuroraImGuiContext
+
 #define IMGUI_DISABLE_DEFAULT_FILE_FUNCTIONS 1
 
 typedef struct SDL_IOStream SDL_IOStream;

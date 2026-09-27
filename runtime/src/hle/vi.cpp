@@ -566,7 +566,7 @@ SceneAnchorPublication PublishVrSceneAnchor() {
     // the XR packet all read it from the policy, so keep it current there;
     // Aurora gets the exact value with the anchor.
     bool scaleChanged = false;
-    if (anchor.valid && anchor.cockpit && anchor.units_per_meter > 0.0f) {
+    if (anchor.valid && anchor.units_per_meter > 0.0f) {
         publication.unitsPerMeter = anchor.units_per_meter;
         const float current = mkw::vr::MkwVRPolicyGetSnapshot().config.first_person_units_per_meter;
         if (std::abs(anchor.units_per_meter - current) > 0.01f * anchor.units_per_meter) {

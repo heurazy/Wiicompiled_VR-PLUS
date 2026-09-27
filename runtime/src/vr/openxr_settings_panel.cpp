@@ -4,9 +4,49 @@
 #include "vr/mkw_vr_policy.h"
 
 #include <atomic>
+#include <chrono>
 #include <mutex>
 
 namespace mkw::vr {
+namespace menu_bridge {
+std::mutex mutex;
+OpenXRUiSnapshot snapshot;
+QuestInput controls;
+PhysicalOptionsButtons physical_options;
+std::chrono::steady_clock::time_point physical_options_time;
+std::atomic<bool> introduction{false}, pause{false};
+}
+void OpenXRPublishPortControls(const QuestInput& input) noexcept {
+    std::lock_guard lock(menu_bridge::mutex); menu_bridge::controls=input;
+}
+QuestInput OpenXRReadPortControls() noexcept {
+    std::lock_guard lock(menu_bridge::mutex); return menu_bridge::controls;
+}
+void OpenXRPublishPhysicalOptionsButtons(PhysicalOptionsButtons buttons) noexcept {
+    std::lock_guard lock(menu_bridge::mutex);
+    menu_bridge::physical_options=buttons;
+    menu_bridge::physical_options_time=std::chrono::steady_clock::now();
+}
+PhysicalOptionsButtons OpenXRReadPhysicalOptionsButtons() noexcept {
+    std::lock_guard lock(menu_bridge::mutex);
+    if(std::chrono::steady_clock::now()-menu_bridge::physical_options_time>
+       std::chrono::milliseconds(250)) return {};
+    return menu_bridge::physical_options;
+}
+void OpenXRPublishUiSnapshot(const OpenXRUiSnapshot& snapshot) noexcept {
+    std::lock_guard lock(menu_bridge::mutex); menu_bridge::snapshot=snapshot;
+}
+OpenXRUiSnapshot OpenXRReadUiSnapshot() noexcept {
+    std::lock_guard lock(menu_bridge::mutex); return menu_bridge::snapshot;
+}
+void OpenXRSetIntroductionActive(bool active) noexcept { menu_bridge::introduction.store(active); }
+bool OpenXRIntroductionActive() noexcept { return menu_bridge::introduction.load(); }
+void OpenXRRequestTutorialPause() noexcept { menu_bridge::pause.store(true); }
+bool OpenXRTakeTutorialPause(bool remote) noexcept {
+    (void)remote;
+    return menu_bridge::pause.exchange(false);
+}
+
 // Named rather than anonymous: runtime sources are unity-built in groups.
 namespace settings_panel_bridge {
 

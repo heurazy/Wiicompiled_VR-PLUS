@@ -154,6 +154,10 @@ private:
     XrAction m_squeeze = XR_NULL_HANDLE;
     XrAction m_button_primary = XR_NULL_HANDLE;   // A / X
     XrAction m_button_secondary = XR_NULL_HANDLE; // B / Y
+    XrAction m_options_x = XR_NULL_HANDLE;
+    XrAction m_options_y = XR_NULL_HANDLE;
+    uint8_t m_options_previous = 0;
+    bool m_native_options_valid = false;
     XrAction m_menu = XR_NULL_HANDLE;
     XrAction m_aim_pose = XR_NULL_HANDLE;
     XrAction m_grip_pose = XR_NULL_HANDLE;
@@ -173,6 +177,8 @@ private:
     bool m_haptics_active[kHands]{};
     uint32_t m_joystick_id = 0; // SDL_JoystickID; 0 when detached
     void* m_joystick = nullptr; // SDL_Joystick*
+    SteamVrTrickPause m_trick_pause;
+    XrPath m_vive_profile = XR_NULL_PATH;
     ClickToggle m_first_person_click;
     SteeringWheel m_wheel;
     WheelReferenceLatch m_wheel_reference;

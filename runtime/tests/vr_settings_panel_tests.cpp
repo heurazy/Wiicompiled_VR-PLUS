@@ -41,8 +41,8 @@ std::array<HandInputs, 2> Released() {
 
 std::array<HandInputs, 2> Chord() {
     std::array<HandInputs, 2> hands{};
-    hands[0].thumbstick_click = true;
-    hands[1].thumbstick_click = true;
+    hands[0].primary = true;
+    hands[0].secondary = true;
     return hands;
 }
 
@@ -53,29 +53,19 @@ std::array<HandInputs, 2> LeftY() {
 }
 
 void LeftYOpensAndClosesOnceAsAWiiRemote() {
-    Controls controls;
-    bool open = false;
-
-    auto right_b = Released();
-    right_b[1].secondary = true;
-    Frame frame = controls.Update(right_b, open, kDt, kWiiRemote);
-    Check(!open && !frame.withheld, "right B neither opens nor withholds");
-    frame = controls.Update(Chord(), open, kDt, kWiiRemote);
-    Check(!open && !frame.withheld, "as a Wii Remote the thumbstick chord does not open the panel");
-    controls.Update(Released(), open, kDt, kWiiRemote);
-
-    frame = controls.Update(LeftY(), open, kDt, kWiiRemote);
-    Check(open && frame.open && frame.withheld, "left Y opens the panel");
-    frame = controls.Update(LeftY(), open, kDt, kWiiRemote);
-    Check(open, "holding left Y does not toggle again");
-    frame = controls.Update(Released(), open, kDt, kWiiRemote);
-    Check(open && frame.withheld, "the panel stays open and keeps the controllers after left Y is released");
-
-    frame = controls.Update(LeftY(), open, kDt, kWiiRemote);
-    Check(!open && !frame.open, "left Y closes the panel again");
-    Check(frame.withheld, "the closing press is still withheld from the game");
-    frame = controls.Update(Released(), open, kDt, kWiiRemote);
-    Check(!frame.withheld, "the game gets the controllers back once everything is released");
+    Controls controls; bool open=false;
+    auto frame=controls.Update(LeftY(),open,kDt,kWiiRemote);
+    Check(!open && !frame.withheld,"Y alone is an item, not options");
+    controls.Update(Released(),open,.25f,kWiiRemote);
+    frame=controls.Update(Chord(),open,kDt,kWiiRemote);
+    Check(open && frame.withheld,"X+Y opens options in either controller mode");
+    controls.Update(Chord(),open,kDt,kWiiRemote);
+    Check(open,"holding X+Y does not toggle twice");
+    controls.Update(Released(),open,.25f,kWiiRemote);
+    frame=controls.Update(Chord(),open,kDt,kWiiRemote);
+    Check(!open && frame.withheld,"closing chord stays out of the game");
+    frame=controls.Update(Released(),open,.25f,kWiiRemote);
+    Check(!frame.withheld,"input returns after release");
 }
 
 void ChordOpensAndClosesOnceAsAGamepad() {
@@ -93,21 +83,21 @@ void ChordOpensAndClosesOnceAsAGamepad() {
     Check(open && frame.open && frame.withheld, "clicking both thumbsticks opens the panel");
     frame = controls.Update(Chord(), open, kDt, kGamepad);
     Check(open, "holding the chord does not toggle again");
-    frame = controls.Update(Released(), open, kDt, kGamepad);
+    frame = controls.Update(Released(), open, .25f, kGamepad);
     Check(open && frame.withheld, "the panel stays open and keeps the controllers after the chord is released");
 
     frame = controls.Update(Chord(), open, kDt, kGamepad);
     Check(!open && !frame.open, "the chord closes the panel again");
     Check(frame.withheld, "the closing chord is still withheld from the game");
-    frame = controls.Update(Released(), open, kDt, kGamepad);
+    frame = controls.Update(Released(), open, .25f, kGamepad);
     Check(!frame.withheld, "the game gets the controllers back once everything is released");
 }
 
 void MenuClosesAndItsPressStaysOutOfTheGame() {
     Controls controls;
     bool open = false;
-    controls.Update(LeftY(), open, kDt, kWiiRemote);
-    controls.Update(Released(), open, kDt, kWiiRemote);
+    controls.Update(Chord(), open, kDt, kWiiRemote);
+    controls.Update(Released(), open, .25f, kWiiRemote);
 
     auto menu = Released();
     menu[0].menu = true;
@@ -116,7 +106,7 @@ void MenuClosesAndItsPressStaysOutOfTheGame() {
     frame = controls.Update(menu, open, kDt, kWiiRemote);
     Check(frame.withheld, "+ held across the close does not reach the game");
     Check(!open, "a held menu button does not reopen the panel");
-    frame = controls.Update(Released(), open, kDt, kWiiRemote);
+    frame = controls.Update(Released(), open, .25f, kWiiRemote);
     Check(!frame.withheld, "released, the controllers go back to the game");
 
     frame = controls.Update(menu, open, kDt, kWiiRemote);
@@ -133,20 +123,20 @@ void SelectWaitsForAReleaseAndFollowsTheTrigger() {
     open = true;
     Frame frame = controls.Update(trigger, open, kDt, kWiiRemote);
     Check(frame.open && !frame.select, "a trigger held from before the panel opened does not click");
-    frame = controls.Update(Released(), open, kDt, kWiiRemote);
+    frame = controls.Update(Released(), open, .25f, kWiiRemote);
     Check(!frame.select, "nothing held, nothing selected");
     frame = controls.Update(trigger, open, kDt, kWiiRemote);
     Check(frame.select && frame.pointing_hand == 1, "a fresh right trigger selects and points with the right hand");
 
     auto left = Released();
     left[0].trigger = 0.9f;
-    controls.Update(Released(), open, kDt, kWiiRemote);
+    controls.Update(Released(), open, .25f, kWiiRemote);
     frame = controls.Update(left, open, kDt, kWiiRemote);
     Check(frame.select && frame.pointing_hand == 0, "pulling the left trigger hands the pointer to the left hand");
 
     auto button = Released();
     button[1].primary = true;
-    controls.Update(Released(), open, kDt, kWiiRemote);
+    controls.Update(Released(), open, .25f, kWiiRemote);
     frame = controls.Update(button, open, kDt, kWiiRemote);
     Check(frame.select && frame.pointing_hand == 0, "A selects without moving the pointer to another hand");
 }
@@ -154,7 +144,7 @@ void SelectWaitsForAReleaseAndFollowsTheTrigger() {
 void ThumbstickScrolls() {
     Controls controls;
     bool open = true;
-    controls.Update(Released(), open, kDt, kWiiRemote);
+    controls.Update(Released(), open, .25f, kWiiRemote);
 
     auto small = Released();
     small[1].stick_y = 0.2f;
@@ -211,6 +201,60 @@ void BridgeAccumulatesWheelUntilTaken() {
 } // namespace
 
 int main() {
+    {
+        Controls controls;bool open=false;
+        auto sticks=Released();sticks[0].thumbstick_click=sticks[1].thumbstick_click=true;
+        controls.Update(sticks,open,kDt,kGamepad);
+        Check(open,"both stick clicks provide the upstream options shortcut");
+        for(int i=0;i<30;++i) controls.Update(sticks,open,kDt,kGamepad);
+        Check(open,"held stick shortcut opens once only");
+        controls.Update(Released(),open,.25f,kGamepad);
+        controls.Update(sticks,open,kDt,kGamepad);
+        Check(!open,"both stick clicks close options after release");
+        controls.Update(Released(),open,.25f,kGamepad);
+        sticks[0].thumbstick_click=false;
+        const auto frame=controls.Update(sticks,open,kDt,kGamepad);
+        Check(!open && !frame.withheld,"one camera stick click cannot open options");
+    }
+    {
+        Controls controls;bool open=false;
+        auto x=Released();x[0].primary=true;
+        controls.Update(x,open,kDt,kGamepad);
+        Check(!open,"X alone remains a trick");
+        controls.Update(Released(),open,kDt,kGamepad);
+        controls.Update(LeftY(),open,kDt,kGamepad);
+        Check(open,"serialized X then Y samples open VR settings");
+        for(int i=0;i<30;++i) controls.Update(LeftY(),open,kDt,kGamepad);
+        Check(open,"holding the second button cannot toggle repeatedly");
+        for(int i=0;i<30;++i) controls.Update(Released(),open,kDt,kGamepad);
+        controls.Update(LeftY(),open,kDt,kGamepad);
+        controls.Update(Released(),open,kDt,kGamepad);
+        controls.Update(x,open,kDt,kGamepad);
+        Check(!open,"serialized Y then X samples close VR settings");
+        controls.Reset();open=false;
+        controls.Update(x,open,kDt,kGamepad);
+        for(int i=0;i<30;++i) controls.Update(Released(),open,kDt,kGamepad);
+        controls.Update(LeftY(),open,kDt,kGamepad);
+        Check(!open,"ordinary trick then later item must not open options");
+    }
+    {
+        Controls controls;bool open=false;
+        controls.Update(Chord(),open,kDt,kGamepad);
+        controls.Update(Released(),open,.25f,kGamepad);
+        controls.Update(Chord(),open,kDt,kGamepad);
+        Check(!open,"second chord closes settings");
+        for(int i=0;i<30;++i) {
+            controls.Update(Released(),open,kDt,kGamepad);
+            controls.Update(Chord(),open,kDt,kGamepad);
+        }
+        Check(!open,"brief SteamVR empty samples cannot reopen a closing chord");
+        controls.Update(LeftY(),open,.25f,kGamepad);
+        controls.Update(Chord(),open,kDt,kGamepad);
+        Check(!open,"partial button release cannot rearm the chord");
+        controls.Update(Released(),open,.25f,kGamepad);
+        controls.Update(Chord(),open,kDt,kGamepad);
+        Check(open,"a stable release allows the next deliberate chord");
+    }
     LeftYOpensAndClosesOnceAsAWiiRemote();
     ChordOpensAndClosesOnceAsAGamepad();
     MenuClosesAndItsPressStaysOutOfTheGame();
@@ -218,6 +262,20 @@ int main() {
     ThumbstickScrolls();
     HitsMapOntoTheCanvas();
     BridgeAccumulatesWheelUntilTaken();
+    {
+        OpenXRPublishPhysicalOptionsButtons({true,true,true});
+        const auto physical=OpenXRReadPhysicalOptionsButtons();
+        Check(physical.valid && physical.x && physical.y,"SteamVR publishes both physically held buttons together");
+        auto hands=Released();hands[0].primary=physical.x;hands[0].secondary=physical.y;
+        Controls controls;bool open=false;
+        const auto frame=controls.Update(hands,open,kDt,kGamepad);
+        OpenXRSetSettingsPanelOpen(open);
+        Check(OpenXRSettingsPanelOpen() && frame.open && frame.withheld,
+            "physical SteamVR chord reaches the actual headset menu flag and blocks game input");
+        OpenXRPublishPhysicalOptionsButtons({});
+        Check(!OpenXRReadPhysicalOptionsButtons().valid,"lost native controller cannot fabricate an options chord");
+        OpenXRSetSettingsPanelOpen(false);
+    }
     if (g_failures != 0) {
         std::cerr << g_failures << " check(s) failed\n";
         return 1;

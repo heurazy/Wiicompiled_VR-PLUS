@@ -30,7 +30,9 @@ internal static class ShellIntegration
     /// <summary>Creates the desktop and Start Menu shortcuts that launch the base game.</summary>
     public static void CreateShortcuts(string installDirectory)
     {
-        var cli = Path.Combine(installDirectory, ProductInfo.SetupCopyName);
+        var launcher = Path.Combine(installDirectory,"WheelWizard","WheelWizard.exe");
+        var hasLauncher=File.Exists(launcher);
+        var cli = hasLauncher ? launcher : Path.Combine(installDirectory, ProductInfo.SetupCopyName);
         var shellType = Type.GetTypeFromProgID("WScript.Shell")
                         ?? throw new InvalidOperationException("The Windows Script Host shell is unavailable.");
         dynamic shell = Activator.CreateInstance(shellType)!;
@@ -38,10 +40,10 @@ internal static class ShellIntegration
         {
             dynamic shortcut = shell.CreateShortcut(path);
             shortcut.TargetPath = cli;
-            shortcut.Arguments = "--launch-base";
+            shortcut.Arguments = hasLauncher ? "" : "--launch-base";
             shortcut.WorkingDirectory = installDirectory;
             shortcut.IconLocation = cli + ",0";
-            shortcut.Description = "Play Mario Kart Wii (base game)";
+            shortcut.Description = "WiiCompiled VR: choose Mario Kart Wii or Retro Rewind";
             shortcut.Save();
         }
     }

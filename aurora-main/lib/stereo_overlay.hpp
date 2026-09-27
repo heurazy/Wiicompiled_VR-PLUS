@@ -44,6 +44,7 @@ bool layer_mode() noexcept;
 // False only when no image can be made.
 bool layer_source(const wgpu::CommandEncoder& encoder, uint32_t width, uint32_t height, stereo::EyeImage& out) noexcept;
 
+bool prepared_source(webgpu::PresentSource& source) noexcept;
 void shutdown() noexcept;
 
 } // namespace aurora::stereo_overlay

@@ -23,7 +23,16 @@
 #include "backends/imgui_impl_wgpu.h"
 #include "tracy/Tracy.hpp"
 
+thread_local ImGuiContext* AuroraImGuiContext = nullptr;
+
 namespace aurora::imgui {
+static ImGuiContext* g_rendererContext = nullptr;
+
+struct RendererContextScope {
+  ImGuiContext* previous = ImGui::GetCurrentContext();
+  RendererContextScope() { ImGui::SetCurrentContext(g_rendererContext); }
+  ~RendererContextScope() { ImGui::SetCurrentContext(previous); }
+};
 static float g_scale;
 static std::string g_imguiLog{};
 static bool g_useSdlRenderer = false;
@@ -53,7 +62,7 @@ void remove_legacy_ini_file(const char* basePath) noexcept {
 
 void create_context() noexcept {
   IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
+  g_rendererContext = ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
   remove_legacy_ini_file(g_config.userPath);
@@ -100,6 +109,7 @@ void shutdown() noexcept {
 }
 
 void process_event(const SDL_Event& event) noexcept {
+  RendererContextScope context;
   auto renderEvent = event;
   if (g_useSdlRenderer) {
     if (SDL_Renderer* renderer = window::get_sdl_renderer()) {
@@ -110,6 +120,7 @@ void process_event(const SDL_Event& event) noexcept {
 }
 
 bool wants_capture_event(const SDL_Event& event) noexcept {
+  RendererContextScope context;
   if (ImGui::GetCurrentContext() == nullptr) {
     return false;
   }
@@ -195,6 +206,7 @@ void render_frame_data() noexcept {
 
 void render(const wgpu::RenderPassEncoder& pass) noexcept {
   ZoneScoped;
+  RendererContextScope context;
   if (g_hostFrames) {
     // The shared context's draw data belongs to the host's current frame now;
     // a sealed frame without a host copy has nothing safe to draw.
@@ -226,6 +238,9 @@ struct HostFrame {
 };
 
 void host_frame_begin(const AuroraWindowSize& size) noexcept {
+  // The guest frame producer can run on a different host thread from startup.
+  // Keep its desktop context selected while the host builds the whole frame.
+  ImGui::SetCurrentContext(g_rendererContext);
   g_hostFrames = true;
   if (g_hostFrameOpen) {
     return;
@@ -272,7 +287,8 @@ const ImDrawData* host_frame_draw_data(const HostFrame& frame) noexcept { return
 
 void render(const wgpu::RenderPassEncoder& pass, const ImDrawData* data) noexcept {
   ZoneScoped;
-  if (g_useSdlRenderer || data == nullptr) {
+  RendererContextScope context;
+  if (g_useSdlRenderer || data == nullptr || g_rendererContext == nullptr) {
     return;
   }
   pass.PushDebugGroup("Aurora: Dear Imgui");
@@ -287,6 +303,7 @@ StereoOverlay latch_stereo_overlay() noexcept {
 
 bool render_draw_data(const wgpu::RenderPassEncoder& pass, ImDrawData* data) noexcept {
   ZoneScoped;
+  RendererContextScope context;
   // The SDL renderer fallback has no render passes to draw into.
   if (g_useSdlRenderer || data == nullptr || ImGui::GetCurrentContext() == nullptr) {
     return false;
@@ -352,10 +369,26 @@ ImTextureID aurora_imgui_add_texture(uint32_t width, uint32_t height, const void
 void aurora_set_stereo_panel_layer(bool enabled) { aurora::stereo_overlay::set_layer_mode(enabled); }
 
 void aurora_imgui_set_stereo_overlay(ImDrawData* drawData, float widthFraction) {
+  // The producer can begin its next panel frame as soon as this call returns.
+  // Own the submitted lists until the worker finishes rather than retaining a
+  // pointer into the producer's mutable ImGui context.
+  std::shared_ptr<aurora::imgui::HostFrame> frame;
+  if (drawData != nullptr) {
+    frame = std::make_shared<aurora::imgui::HostFrame>();
+    frame->data = *drawData;
+    frame->data.CmdLists.clear();
+    frame->lists.reserve(drawData->CmdListsCount);
+    for (int i = 0; i < drawData->CmdListsCount; ++i) {
+      ImDrawList* copy = drawData->CmdLists[i]->CloneOutput();
+      frame->lists.push_back(copy);
+      frame->data.CmdLists.push_back(copy);
+    }
+  }
   std::lock_guard lock(aurora::imgui::g_stereoOverlayMutex);
   aurora::imgui::g_stereoOverlay = {
-      .drawData = drawData,
+      .drawData = frame ? &frame->data : nullptr,
       .widthFraction = drawData != nullptr ? widthFraction : 0.f,
+      .frame = std::move(frame),
   };
 }
 }

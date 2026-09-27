@@ -68,6 +68,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
 struct State {
   webgpu::TextureWithSampler panel;
+  wgpu::BindGroup uiBinding;
   wgpu::RenderPipeline pipeline;
   wgpu::BindGroupLayout bindGroupLayout;
   wgpu::TextureFormat pipelineFormat = wgpu::TextureFormat::Undefined;
@@ -276,6 +277,7 @@ wgpu::CommandBuffer prepare(ImDrawData* drawData, float widthFraction) noexcept 
   if (!state.panel.texture || state.panel.size.width != width || state.panel.size.height != height ||
       state.panel.format != format) {
     state.panel = webgpu::create_render_texture(width, height, false);
+    state.uiBinding = {};
     state.bindGroups = {};
   }
   // The ImGui backend sets its viewport from the draw data, so a texture the
@@ -388,6 +390,14 @@ bool layer_source(const wgpu::CommandEncoder& encoder, uint32_t width, uint32_t 
   }
   out = {.texture = &state.transparent.texture, .view = &state.transparent.view, .size = state.transparent.size,
          .format = format};
+  return true;
+}
+
+bool prepared_source(webgpu::PresentSource& source) noexcept {
+  if (!g_state.visible || !g_state.panel.texture) return false;
+  if (!g_state.uiBinding) g_state.uiBinding=webgpu::create_copy_bind_group(g_state.panel.view,g_state.panel.sampler);
+  source = {.bindGroup=g_state.uiBinding,
+            .texture=g_state.panel.texture, .size=g_state.panel.size, .format=g_state.panel.format};
   return true;
 }
 

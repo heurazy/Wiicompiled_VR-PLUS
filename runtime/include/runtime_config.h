@@ -1,4 +1,5 @@
 #pragma once
+#include "vr/control_settings.h"
 
 #include <algorithm>
 #include <array>
@@ -34,6 +35,26 @@
 #endif
 
 struct RuntimeUserConfig {
+#if defined(__ANDROID__)
+    static constexpr bool kDefaultForceSteamVr = false;
+    static constexpr int kDefaultMenuShaderQuality = 1;
+#else
+    static constexpr bool kDefaultForceSteamVr = true;
+    static constexpr int kDefaultMenuShaderQuality = 3;
+#endif
+    bool vrWelcomeComplete = false;
+    unsigned vrTutorialCompleted = 0;
+    int vrDefaultCamera = 0;
+    std::optional<int> vrCameraMode;
+    float vrDioramaDistance = 1200.0f;
+    float vrDioramaHeight = 900.0f;
+    float vrDioramaUnitsPerMeter = 500.0f;
+    bool vrForceSteamVr = kDefaultForceSteamVr;
+    bool vrAdaptiveResolution = false;
+    mkw::vr::QuestStickCalibration vrStickCalibration{};
+    mkw::vr::QuestButtonMapping vrButtonMapping{};
+    bool vrHandHud = true;
+    int vrMenuShaderQuality = kDefaultMenuShaderQuality;
     std::optional<bool> widescreen;
     std::optional<int32_t> windowPosX;
     std::optional<int32_t> windowPosY;
@@ -283,7 +304,7 @@ inline bool IsSupportedVrMirrorView(std::string_view value) {
 // What the tracked VR controllers are to the game: "wii_remote" is a Wii
 // Remote with a Nunchuk (motion and pointer included), "gamepad" one ordinary
 // controller read as a GameCube pad. Matches mkw::vr::OpenXRControllerMode.
-inline constexpr const char* kVrControllerModeDefault = "wii_remote";
+inline constexpr const char* kVrControllerModeDefault = "gamepad";
 
 inline bool IsSupportedVrControllerMode(std::string_view value) {
     return value == "wii_remote" || value == "gamepad";
@@ -509,9 +530,9 @@ inline void EnsureConfigFile() {
               "# the virtual screen) plus a Nunchuk (left hand); \"gamepad\" is one\n"
               "# ordinary controller read as a GameCube pad. Changeable live from\n"
               "# the F10 menu.\n"
-              "controller_mode = \"wii_remote\"\n"
+              "controller_mode = \"gamepad\"\n"
               "# VR interpolation: 0 = Off, 1 = Auto, or 72/90/120 FPS. Live.\n"
-              "frame_interpolation_fps = 0\n"
+              "frame_interpolation_fps = 1\n"
               "render_scale = " MKW_VR_RENDER_SCALE_DEFAULT_TEXT "\n"
               "world_units_per_meter = 500.0\n"
               "hud_distance_meters = 2.0\n"
@@ -547,6 +568,19 @@ inline void EnsureConfigFile() {
               "# the kart, with the horizon kept level. Changeable live from the\n"
               "# F10 menu, and only during a single-screen race.\n"
               "first_person = false\n"
+              "camera_mode = 0\n"
+              "default_camera = 0\n"
+              "welcome_complete = false\n"
+              "tutorial_completed = 0\n"
+              "diorama_distance = 1200.0\n"
+              "diorama_height = 900.0\n"
+              "diorama_units_per_meter = 500.0\n"
+              "hand_hud = true\n"
+#if defined(__ANDROID__)
+              "menu_shader_quality = 1\n"
+#else
+              "menu_shader_quality = 3\n"
+#endif
               "# Clicking the right thumbstick, on the VR controllers or on any\n"
               "# gamepad while VR runs, toggles first_person as the F10 checkbox does.\n"
               "first_person_toggle_click = true\n"
@@ -795,6 +829,23 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.vrStopAtDisplayCopy = FindConfigValue<bool>(document, "vr", "stop_at_display_copy");
     config.vrSkipCopyClears = FindConfigValue<bool>(document, "vr", "skip_copy_clears");
     config.vrSinglePassEyes = FindConfigValue<bool>(document, "vr", "single_pass_eyes");
+    config.vrWelcomeComplete = FindConfigValue<bool>(document, "vr", "welcome_complete").value_or(false);
+    config.vrTutorialCompleted = FindConfigValue<unsigned>(document, "vr", "tutorial_completed").value_or(0) & 3u;
+    config.vrDefaultCamera = std::clamp(FindConfigValue<int>(document, "vr", "default_camera").value_or(0), 0, 2);
+    config.vrCameraMode = FindConfigValue<int>(document, "vr", "camera_mode");
+    config.vrDioramaDistance = std::clamp(FindConfigFloat(document, "vr", "diorama_distance").value_or(1200), 200.0f, 5000.0f);
+    config.vrDioramaHeight = std::clamp(FindConfigFloat(document, "vr", "diorama_height").value_or(900), 50.0f, 4000.0f);
+    config.vrDioramaUnitsPerMeter = std::clamp(FindConfigFloat(document, "vr", "diorama_units_per_meter").value_or(500), 50.0f, 2000.0f);
+    config.vrForceSteamVr = FindConfigValue<bool>(document,"vr","force_steamvr").value_or(RuntimeUserConfig::kDefaultForceSteamVr);
+    config.vrAdaptiveResolution = FindConfigValue<bool>(document,"vr","adaptive_resolution").value_or(false);
+    config.vrStickCalibration.deadzone=std::clamp(FindConfigFloat(document,"vr","stick_deadzone").value_or(.15f),0.f,.4f);
+    config.vrStickCalibration.outer=std::clamp(FindConfigFloat(document,"vr","stick_outer").value_or(1.f),.6f,1.f);
+    config.vrStickCalibration.center_x=std::clamp(FindConfigFloat(document,"vr","stick_center_x").value_or(0.f),-.3f,.3f);
+    config.vrStickCalibration.center_y=std::clamp(FindConfigFloat(document,"vr","stick_center_y").value_or(0.f),-.3f,.3f);
+    config.vrButtonMapping.swapItemTrick=FindConfigValue<bool>(document,"vr","swap_item_trick").value_or(false);
+    config.vrButtonMapping.swapCockpitDriftBrake=FindConfigValue<bool>(document,"vr","swap_cockpit_drift_brake").value_or(false);
+    config.vrHandHud = FindConfigValue<bool>(document, "vr", "hand_hud").value_or(true);
+    config.vrMenuShaderQuality = std::clamp(FindConfigValue<int>(document, "vr", "menu_shader_quality").value_or(RuntimeUserConfig::kDefaultMenuShaderQuality), 0, 3);
     config.vrFirstPerson = FindConfigValue<bool>(document, "vr", "first_person");
     config.vrFirstPersonFollowVehicleMotion =
         FindConfigValue<bool>(document, "vr", "first_person_follow_vehicle_motion");
@@ -899,7 +950,7 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
     config.attenuateMusicWhenMediaPlays =
         FindConfigValue<bool>(document, "audio", "attenuate_music_when_media_plays");
     config.wiiRemotes = FindConfigValue<bool>(document, "controller", "wii_remotes");
-    config.wiiContinuousScan = FindConfigValue<bool>(document, "controller", "wii_continuous_scan");
+    config.wiiContinuousScan = FindConfigValue<bool>(document, "controller", "wii_continuous_scan_opt_in");
     config.wiiAccelOffsetX = FindConfigValue<double>(document, "controller", "wii_accel_offset_x");
     config.wiiAccelOffsetY = FindConfigValue<double>(document, "controller", "wii_accel_offset_y");
     config.wiiAccelOffsetZ = FindConfigValue<double>(document, "controller", "wii_accel_offset_z");
@@ -1146,9 +1197,20 @@ inline bool SetVrSinglePassEyes(bool value) {
     return WriteSetting("vr", "single_pass_eyes", value ? "true" : "false");
 }
 
+inline int VrCameraMode() { return std::clamp(Get().vrCameraMode.value_or(Get().vrFirstPerson.value_or(false) ? 1 : 0), 0, 2); }
+inline float VrDioramaDistance() { return Get().vrDioramaDistance; }
+inline float VrDioramaHeight() { return Get().vrDioramaHeight; }
+inline float VrDioramaUnitsPerMeter() { return Get().vrDioramaUnitsPerMeter; }
+inline bool SetVrCameraMode(int value) {
+    value = std::clamp(value, 0, 2);
+    if (!WriteSetting("vr", "camera_mode", std::to_string(value))) return false;
+    Mutable().vrCameraMode = value;
+    Mutable().vrFirstPerson = value == 1;
+    return true;
+}
 inline bool SetVrFirstPerson(bool value) {
     Mutable().vrFirstPerson = value;
-    return WriteSetting("vr", "first_person", value ? "true" : "false");
+    return WriteSetting("vr", "first_person", value ? "true" : "false") && SetVrCameraMode(value ? 1 : 0);
 }
 
 inline bool SetVrFirstPersonFollowVehicleMotion(bool value) {
@@ -1226,6 +1288,9 @@ inline bool SetVrControllerMode(std::string value) {
 }
 
 inline bool SetVrFrameInterpolationFps(uint32_t value) {
+#ifdef __ANDROID__
+    value = 0;
+#endif
     value = mkw::vr::NormalizeFrameInterpolationFps(value);
     Mutable().vrFrameInterpolationFps = value;
     return WriteSetting("vr", "frame_interpolation_fps", std::to_string(value));
@@ -1497,7 +1562,7 @@ inline bool WiiContinuousScanEnabled(bool fallback = false) {
 // Persists the continuous scanning switch.
 inline bool SetWiiContinuousScanEnabled(bool value) {
     Mutable().wiiContinuousScan = value;
-    return WriteSetting("controller", "wii_continuous_scan", value ? "true" : "false");
+    return WriteSetting("controller", "wii_continuous_scan_opt_in", value ? "true" : "false");
 }
 
 // Wii Remote accelerometer zero-point correction (g, SDL sensor frame); all zero
@@ -1537,7 +1602,11 @@ inline bool SetWiiAccelOffset(const std::array<double, 3>& offset) {
 
 // Target frame rate for frame interpolation, or 0 to disable it.
 inline uint32_t FrameInterpolationFps(uint32_t fallback = 0) {
+#ifdef __ANDROID__
+    return 0;
+#else
     return Get().frameInterpolationFps.value_or(fallback);
+#endif
 }
 
 // Whether to skip draws whose graphics pipeline has not finished compiling yet.
@@ -1726,7 +1795,12 @@ inline std::string VrControllerMode(std::string fallback = kVrControllerModeDefa
 }
 
 inline uint32_t VrFrameInterpolationFps() {
-    return mkw::vr::NormalizeFrameInterpolationFps(Get().vrFrameInterpolationFps.value_or(0));
+#ifdef __ANDROID__
+    // Ignore saved PC/preview interpolation settings on standalone Quest.
+    return 0;
+#else
+    return mkw::vr::NormalizeFrameInterpolationFps(Get().vrFrameInterpolationFps.value_or(1));
+#endif
 }
 
 inline bool DiagnosticsOpenXRLogging(bool fallback = false) {

@@ -5,6 +5,7 @@
 #endif
 
 #include "vr/openxr_integration.h"
+#include "vr/menu_anchor.h"
 
 #include "runtime_config.h"
 #include "gx_thread.h"
@@ -33,6 +34,7 @@
 #include "vr/openxr_backend.h"
 #include "vr/openxr_hand_mesh.h"
 #include "vr/openxr_input.h"
+#include "vr/adaptive_resolution.h"
 #include "vr/openxr_runtime.h"
 #if defined(_WIN32)
 #include "vr/openxr_windows.h"
@@ -182,13 +184,10 @@ std::array<float, 3> CenterPosition(const OpenXRFrame& frame) noexcept {
 // player's head happened to be doing when it was anchored.
 XrPosef ScreenPoseAhead(const OpenXRFrame& frame, float distance) noexcept {
     const auto& q = frame.views[0].pose.orientation;
-    const float yaw =
-        std::atan2(2.0f * (q.x * q.z + q.w * q.y), 1.0f - 2.0f * (q.x * q.x + q.y * q.y));
-    const std::array<float, 3> center = CenterPosition(frame);
+    const auto screen=UprightMenuAhead({q.x,q.y,q.z,q.w},CenterPosition(frame),distance);
     XrPosef pose{};
-    pose.orientation = {0.0f, std::sin(yaw * 0.5f), 0.0f, std::cos(yaw * 0.5f)};
-    pose.position = {center[0] - std::sin(yaw) * distance, center[1],
-                     center[2] - std::cos(yaw) * distance};
+    pose.orientation = {screen.orientation[0],screen.orientation[1],screen.orientation[2],screen.orientation[3]};
+    pose.position = {screen.position[0],screen.position[1],screen.position[2]};
     return pose;
 }
 
@@ -196,6 +195,10 @@ XrPosef ScreenPoseAhead(const OpenXRFrame& frame, float distance) noexcept {
 // it offers one (XR_FB_hand_tracking_mesh). Only asked for when hand steering
 // is on at launch; turning it on later uses the procedural gloves.
 void AddHandMeshExtensions(OpenXRConfig& config) {
+    for(const char* extension:{"XR_EXT_samsung_odyssey_controller",
+        "XR_HTC_vive_cosmos_controller_interaction","XR_HTC_vive_focus3_controller_interaction",
+        "XR_FB_touch_controller_pro","XR_META_touch_controller_plus","XR_BD_controller_interaction"})
+        config.optional_extensions.emplace_back(extension);
     if (RuntimeConfigFile::VrHandSteering()) {
         config.optional_extensions.push_back("XR_EXT_hand_tracking");
         config.optional_extensions.push_back("XR_FB_hand_tracking_mesh");
@@ -563,6 +566,9 @@ public:
     }
 
     void SetFrameInterpolationFps(uint32_t target) noexcept {
+#ifdef __ANDROID__
+        target = 0;
+#endif
         frame_interpolation_fps_.store(NormalizeFrameInterpolationFps(target), std::memory_order_relaxed);
     }
 
@@ -827,6 +833,20 @@ private:
                 continue;
             }
 
+            // Reference spaces can only be replaced between XR frames. The
+            // startup pose check schedules this after the previous submission,
+            // so eyes, menu and controller rays all use the new space together.
+            if (startup_origin_pending_) {
+                startup_origin_pending_=false;
+                if(runtime_->ResetAppSpace(startup_origin_pose_)) {
+                    const auto& q=startup_origin_pose_.orientation;
+                    startup_origin_applied_=StartupReferenceInverted({q.x,q.y,q.z,q.w});
+                    ResetTrackingOrigin();
+                    RT_LOG(RT_TAG_RUNTIME) << (startup_origin_applied_ ?
+                        "OpenXR: repaired inverted startup reference space" :
+                        "OpenXR: cleared startup correction after runtime recenter") << std::endl;
+                }
+            }
             const MkwVRPolicySnapshot policy = MkwVRPolicyGetSnapshot();
             // Diagnostics lift the cap: a presentation flickering between the
             // race and the virtual screen is exactly what a report needs to show.
@@ -852,7 +872,7 @@ private:
             }
             OpenXRPresentation presentation{};
             const bool immersive = policy.presentation == VRPresentationMode::ImmersiveRace;
-            presentation.mode = immersive ? OpenXRFrameMode::ImmersiveProjection
+            presentation.mode = (immersive || RuntimeConfigFile::Get().vrMenuShaderQuality>0 || OpenXRIntroductionActive()) ? OpenXRFrameMode::ImmersiveProjection
                                            : OpenXRFrameMode::VirtualScreen;
             presentation.quad_distance_meters = policy.config.hud_distance_meters;
             presentation.quad_width_meters = policy.config.hud_width_meters;
@@ -872,12 +892,12 @@ private:
             // The settings panel gets a compositor layer of its own while it is
             // open, and Aurora leaves it out of the eyes. A backend that could
             // not make that layer has the panel drawn into the eyes instead.
-            const bool panel_layer = backend_->PanelLayerAvailable() && !PanelLayerForcedOff();
+            const bool panel_layer = false; // Keep VR settings in the same stereo eyes as the menu/tutorial.
             aurora_set_stereo_panel_layer(panel_layer);
             PollEyePassesOverride();
             PollFoveationOverride();
             PollWindowEyesOverride();
-            presentation.panel.requested = panel_layer && OpenXRSettingsPanelOpen();
+            presentation.panel.requested = panel_layer && (OpenXRSettingsPanelOpen() || OpenXRIntroductionActive());
 
             // Pipeline caches are stored where their stall is least visible: once when a race
             // ends, and by the compiler itself while the headset shows the virtual screen. Never
@@ -899,7 +919,7 @@ private:
             // Updating this on the owner thread also confines retained replay to
             // validated race content. The provider checks policy tags again.
             const uint32_t interpolation_target = frame_interpolation_fps_.load(std::memory_order_relaxed);
-            SetInterpolationActive(immersive && FrameInterpolationAvailable() && interpolation_target != 0);
+            SetInterpolationActive(FrameInterpolationAvailable() && interpolation_target != 0);
 
             // With interpolation off, the eyes are rendered before
             // the compositor frame that shows them is begun, so that frame never waits for a
@@ -941,6 +961,7 @@ private:
             // Both of these read this frame's located head pose and must run
             // before FinishFrame submits a layer built from it.
             ServiceRecenterRequest();
+            ApplyPendingReferenceSpaceChange(frame.xr_frame);
             UpdateVirtualScreenPose(frame);
             const OpenXRPointerScreen panel_screen = SettingsPanelScreen(frame, policy, immersive);
             PlacePanelLayer(frame, panel_screen);
@@ -1126,6 +1147,7 @@ private:
         }
         // The head pose this packet was located with places the screens and aims the pointer.
         ServiceRecenterRequest();
+        ApplyPendingReferenceSpaceChange(packet.xr_frame);
         UpdateVirtualScreenPose(packet);
         const OpenXRPointerScreen panel_screen = SettingsPanelScreen(packet, policy, immersive);
         PlacePanelLayer(packet, panel_screen);
@@ -1261,7 +1283,6 @@ private:
     void BuildPublishedFrame(OpenXRBackendFrame& source, bool immersive, const MkwVRPolicySnapshot& policy) noexcept {
         const float units_per_meter = policy.EffectiveUnitsPerMeter();
         const uint64_t content_tag = policy.content_tag;
-        ApplyPendingReferenceSpaceChange(source.xr_frame);
         auto& destination = published_frame_.frame;
         destination = {};
         destination.frameToken = source.xr_frame.serial;
@@ -1271,12 +1292,14 @@ private:
                                       : AURORA_STEREO_FRAME_VIRTUAL_SCREEN;
         destination.window = immersive && source.presentation.immersive_window;
         for (uint32_t eye = 0; eye < kOpenXREyeCount; ++eye) {
-            destination.eyes[eye].width = source.render_width[eye];
-            destination.eyes[eye].height = source.render_height[eye];
+            const float scale=RuntimeConfigFile::Get().vrAdaptiveResolution?adaptive_scale_:1.f;
+            destination.eyes[eye].width = std::max(2u,uint32_t(source.render_width[eye]*scale));
+            destination.eyes[eye].height = std::max(2u,uint32_t(source.render_height[eye]*scale));
             IdentityEye(destination.eyes[eye]);
         }
         if (!immersive) {
             last_immersive_ = false;
+            BuildMenuUi(source, destination);
             return;
         }
 
@@ -1311,6 +1334,61 @@ private:
                          lean_back_radians, destination.eyes[eye].viewFromCenter);
         }
         BuildCockpit(source, position_valid, units_per_meter, lean_back_radians, destination.cockpit);
+        BuildHandHud(source, destination);
+    }
+
+    static void ViewFromPose(const XrPosef& eye, const XrPosef& panel, float out[12]) noexcept {
+        const Quaternion q=Conjugate(Normalize({eye.orientation.x,eye.orientation.y,eye.orientation.z,eye.orientation.w}));
+        const Quaternion p=Normalize({panel.orientation.x,panel.orientation.y,panel.orientation.z,panel.orientation.w});
+        float r[9]; RotationMatrix(Multiply(q,p),r);
+        const auto t=Rotate(q,{panel.position.x-eye.position.x,panel.position.y-eye.position.y,panel.position.z-eye.position.z});
+        for(int row=0;row<3;++row) { for(int col=0;col<3;++col) out[row*4+col]=r[row*3+col]; out[row*4+3]=t[row]; }
+    }
+    void BuildMenuUi(const OpenXRBackendFrame& source, AuroraStereoFrame& destination) noexcept {
+        XrPosef panel{};
+        if ((RuntimeConfigFile::Get().vrMenuShaderQuality==0 && !OpenXRIntroductionActive()) || !MenuScreenPose(source,panel)) return;
+        destination.ui.anchored=true;
+        destination.ui.distance=source.presentation.quad_distance_meters;
+        destination.ui.width=source.presentation.quad_width_meters;
+        // vrui's origin is behind the visible panel at z=-distance.
+        const Quaternion rotation{panel.orientation.x,panel.orientation.y,panel.orientation.z,panel.orientation.w};
+        const auto ahead=Rotate(rotation,{0,0,destination.ui.distance});
+        panel.position.x+=ahead[0];panel.position.y+=ahead[1];panel.position.z+=ahead[2];
+        const auto input=OpenXRReadUiSnapshot();
+        const Quaternion inverse=Conjugate(rotation);
+        for(int hand=0;hand<2;++hand) {
+            const auto& h=input.hands[hand]; const auto& aim=input.aims[hand];
+            destination.ui.tracked[hand]=input.active && h.valid;
+            destination.ui.pointerTracked[hand]=input.active && aim.valid;
+            const auto translate=[&](const std::array<float,3>& position) {
+                return Rotate(inverse,{position[0]-panel.position.x,position[1]-panel.position.y,position[2]-panel.position.z});
+            };
+            const auto pos=translate(h.position),right=Rotate(inverse,h.right),up=Rotate(inverse,h.up),forward=Rotate(inverse,h.forward);
+            auto* m=destination.ui.panelFromGrip[hand];
+            for(int row=0;row<3;++row) {m[row*4]=right[row];m[row*4+1]=up[row];m[row*4+2]=-forward[row];m[row*4+3]=pos[row];}
+            const auto a=translate(aim.position),dir=Rotate(inverse,aim.forward);
+            for(int axis=0;axis<3;++axis) { destination.ui.pointerRay[hand][axis]=a[axis];destination.ui.pointerRay[hand][axis+3]=dir[axis]; }
+        }
+        for(int eye=0;eye<2;++eye) {
+            ProjectionFromFov(source.xr_frame.views[eye].fov,destination.eyes[eye].projection);
+            ViewFromPose(source.xr_frame.views[eye].pose,panel,destination.ui.eyeFromPanel[eye]);
+        }
+    }
+    void BuildHandHud(const OpenXRBackendFrame& source, AuroraStereoFrame& destination) noexcept {
+        const auto input=OpenXRReadUiSnapshot();
+        if (!RuntimeConfigFile::Get().vrHandHud || MkwVRGetCameraMode()==CameraMode::FirstPerson ||
+            !input.active || !input.hands[0].valid) return;
+        const auto& h=input.hands[0];
+        const auto head=CenterPosition(source.xr_frame);
+        const std::array<float,3> center{h.position[0]+h.up[0]*.06f,h.position[1]+h.up[1]*.06f,h.position[2]+h.up[2]*.06f};
+        const float dx=head[0]-center[0],dy=head[1]-center[1],dz=head[2]-center[2];
+        const float yaw=std::atan2(dx,dz),pitch=-std::atan2(dy,std::sqrt(dx*dx+dz*dz));
+        const auto rotation=Multiply({0,std::sin(yaw/2),0,std::cos(yaw/2)},{std::sin(pitch/2),0,0,std::cos(pitch/2)});
+        const auto normal=Rotate(rotation,{0,0,1});
+        const XrPosef panel{{rotation.x,rotation.y,rotation.z,rotation.w},
+            {center[0]+normal[0],center[1]+normal[1],center[2]+normal[2]}};
+        destination.handHud=true;
+        for(int eye=0;eye<2;++eye) ViewFromPose(source.xr_frame.views[eye].pose,panel,destination.handHudViewFromPanel[eye]);
     }
 
     // The first-person cockpit's hands and separate wheel, in the seated frame
@@ -1457,16 +1535,39 @@ private:
     // pose is captured once, from the first frame whose head pose is good enough
     // to place it, and released again by a recenter or an origin change.
     void UpdateVirtualScreenPose(OpenXRBackendFrame& frame) noexcept {
-        if (frame.presentation.mode != OpenXRFrameMode::VirtualScreen) {
+        if (frame.presentation.mode != OpenXRFrameMode::VirtualScreen && RuntimeConfigFile::Get().vrMenuShaderQuality==0 && !OpenXRIntroductionActive()) {
             return;
         }
         constexpr XrViewStateFlags kPoseUsable =
             XR_VIEW_STATE_ORIENTATION_VALID_BIT | XR_VIEW_STATE_POSITION_VALID_BIT;
-        if (!virtual_screen_pose_valid_ && frame.xr_frame.views_valid &&
-            (frame.xr_frame.view_state_flags & kPoseUsable) == kPoseUsable) {
+        // Initial valid poses may precede focus and positional tracking. Do
+        // not retain those startup/floor-origin samples as the user's seat.
+        const bool tracked = runtime_->IsSessionFocused() && frame.xr_frame.views_valid &&
+            (frame.xr_frame.view_state_flags & (kPoseUsable | XR_VIEW_STATE_POSITION_TRACKED_BIT |
+             XR_VIEW_STATE_ORIENTATION_TRACKED_BIT)) == (kPoseUsable | XR_VIEW_STATE_POSITION_TRACKED_BIT |
+             XR_VIEW_STATE_ORIENTATION_TRACKED_BIT);
+        const auto now=std::chrono::steady_clock::now();
+        if (!tracked) menu_tracking_started_={};
+        else if (menu_tracking_started_==std::chrono::steady_clock::time_point{}) menu_tracking_started_=now;
+        if (!virtual_screen_pose_valid_ && tracked &&
+            now-menu_tracking_started_ >= std::chrono::milliseconds(500)) {
+            if(!startup_origin_checked_) {
+                startup_origin_checked_=true;
+                const auto& q=frame.xr_frame.views[0].pose.orientation;
+                if(StartupReferenceInverted({q.x,q.y,q.z,q.w})) {
+                    const auto center=CenterPosition(frame.xr_frame);
+                    startup_origin_pose_={q,{center[0],center[1],center[2]}};
+                    startup_origin_pending_=true;
+                    frame.presentation.quad_anchored=false;
+                    return;
+                }
+            }
             virtual_screen_pose_ = ScreenPoseAhead(
                 frame.xr_frame, std::max(0.25f, frame.presentation.quad_distance_meters));
             virtual_screen_pose_valid_ = true;
+            RT_LOG(RT_TAG_RUNTIME) << "OpenXR upright menu anchor latched after tracking: "
+                << virtual_screen_pose_.position.x << ", " << virtual_screen_pose_.position.y
+                << ", " << virtual_screen_pose_.position.z << std::endl;
         }
         frame.presentation.quad_anchored = virtual_screen_pose_valid_;
         frame.presentation.quad_pose = virtual_screen_pose_;
@@ -1510,6 +1611,11 @@ private:
 
         if (frame.render_width[0] == 0 || frame.render_height[0] == 0 || !MenuScreenPose(frame, screen.pose)) {
             return screen;
+        }
+        if (RuntimeConfigFile::Get().vrMenuShaderQuality>0 || OpenXRIntroductionActive()) {
+            screen.half_width_meters=.5f*frame.presentation.quad_width_meters;
+            screen.half_height_meters=screen.half_width_meters/snapshot_aspect;
+            screen.valid=true;return screen;
         }
         const float eye_aspect =
             static_cast<float>(frame.render_width[0]) / static_cast<float>(frame.render_height[0]);
@@ -1695,7 +1801,7 @@ private:
     // Centre of the menu quad: where UpdateVirtualScreenPose anchored it, or
     // its head-locked fallback straight ahead of the head.
     bool MenuScreenPose(const OpenXRBackendFrame& frame, XrPosef& pose) const noexcept {
-        if (frame.presentation.mode != OpenXRFrameMode::VirtualScreen) {
+        if (frame.presentation.immersive_window) {
             return false;
         }
         if (frame.presentation.quad_anchored) {
@@ -1707,18 +1813,19 @@ private:
             (xr_frame.view_state_flags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0) {
             return false;
         }
-        const auto& head = xr_frame.views[0].pose.orientation;
-        const Quaternion orientation = Normalize({head.x, head.y, head.z, head.w});
-        const std::array<float, 3> center = CenterPosition(xr_frame);
-        const std::array<float, 3> ahead =
-            Rotate(orientation, {0.0f, 0.0f, -std::max(0.25f, frame.presentation.quad_distance_meters)});
-        pose.orientation = {orientation.x, orientation.y, orientation.z, orientation.w};
-        pose.position = {center[0] + ahead[0], center[1] + ahead[1], center[2] + ahead[2]};
+        pose = ScreenPoseAhead(xr_frame, std::max(0.25f, frame.presentation.quad_distance_meters));
         return true;
     }
 
     void ApplyPendingReferenceSpaceChange(const OpenXRFrame& frame) noexcept {
-        if (runtime_->ConsumeAppSpaceChangesThrough(frame.predicted_display_time)) {
+        bool external=false;
+        if (runtime_->ConsumeAppSpaceChangesThrough(frame.predicted_display_time, &external)) {
+            if (external && startup_origin_applied_) {
+                // Runtime recenter has already corrected its own axes. Keeping
+                // our startup rotation would apply that correction twice.
+                startup_origin_pose_={{0,0,0,1},{0,0,0}};
+                startup_origin_pending_=true;
+            }
             ResetTrackingOrigin();
         }
     }
@@ -1730,9 +1837,13 @@ private:
         // The anchored menu screen is placed in the same space, so it is stale
         // for exactly the same reasons and is re-placed on the next frame.
         virtual_screen_pose_valid_ = false;
+        menu_tracking_started_ = {};
     }
 
     void SetInterpolationActive(bool active) noexcept {
+#ifdef __ANDROID__
+        active = false;
+#endif
         std::lock_guard lock(interpolation_mutex_);
         aurora_set_stereo_frame_interpolation(active && !interpolation_stopping_);
     }
@@ -1749,6 +1860,8 @@ private:
         const float elapsed = std::chrono::duration<float>(now - timing_start_).count();
         if (elapsed >= 1.0f) {
             rendered_fps_.store(static_cast<float>(timing_submissions_) / elapsed, std::memory_order_relaxed);
+            adaptive_scale_=adaptive_resolution_.Observe(static_cast<float>(timing_submissions_)/elapsed,
+                aurora_get_stereo_frame_interpolation()?hz:std::min(hz,60.f),RuntimeConfigFile::Get().vrAdaptiveResolution);
             timing_start_ = now;
             timing_submissions_ = 0;
         }
@@ -1887,6 +2000,9 @@ private:
     std::atomic_bool stop_{false};
     std::atomic_bool running_{false};
     std::atomic_bool teardown_requested_{false};
+    std::chrono::steady_clock::time_point menu_tracking_started_{};
+    bool startup_origin_checked_=false, startup_origin_pending_=false, startup_origin_applied_=false;
+    XrPosef startup_origin_pose_{};
     std::atomic_bool recenter_requested_{false};
     std::atomic<float> lean_back_degrees_{RuntimeConfigFile::VrLeanBackDegrees()};
     std::atomic_bool passthrough_{RuntimeConfigFile::VrPassthrough()};
@@ -1900,6 +2016,8 @@ private:
     std::atomic<float> rendered_fps_{0};
     std::chrono::steady_clock::time_point timing_start_ = std::chrono::steady_clock::now();
     uint32_t timing_submissions_ = 0;
+    AdaptiveResolution adaptive_resolution_;
+    float adaptive_scale_=1.f;
     PFN_xrGetDisplayRefreshRateFB get_display_refresh_rate_ = nullptr;
     PFN_xrPerfSettingsSetPerformanceLevelEXT set_performance_level_ = nullptr;
 #if defined(_WIN32)

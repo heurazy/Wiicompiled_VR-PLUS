@@ -52,6 +52,7 @@ struct OpenXRRuntimeInfo {
 };
 
 struct OpenXRReferenceSpaceChange {
+    bool external = true; // False for an application-created replacement.
     uint64_t serial = 0;
     XrReferenceSpaceType type = XR_REFERENCE_SPACE_TYPE_LOCAL;
     XrTime change_time = 0;
@@ -227,7 +228,7 @@ public:
     // Consumes every queued application-space change whose effective time is
     // no later than display_time. Multiple future recenter events are retained
     // independently rather than overwriting one another.
-    bool ConsumeAppSpaceChangesThrough(XrTime display_time);
+    bool ConsumeAppSpaceChangesThrough(XrTime display_time, bool* external = nullptr);
     const OpenXRError& LastError() const { return m_last_error; }
 
 private:

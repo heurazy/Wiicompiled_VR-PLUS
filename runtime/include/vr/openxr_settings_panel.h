@@ -3,6 +3,8 @@
 #pragma once
 
 #include "vr/openxr_wii_remote.h"
+#include "vr/onboarding.h"
+#include "vr/quest_input.h"
 
 #include <algorithm>
 #include <array>
@@ -47,6 +49,23 @@ void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select
 // Game thread: the latest pointer, taking the wheel steps accumulated since the last call.
 OpenXRSettingsPanelPointer OpenXRTakeSettingsPanelPointer() noexcept;
 
+struct OpenXRUiSnapshot {
+    bool active=false;
+    std::array<UiHandPose,2> hands{}, aims{};
+    std::array<wii_remote::HandInputs,2> buttons{};
+};
+void OpenXRPublishPortControls(const QuestInput& input) noexcept;
+QuestInput OpenXRReadPortControls() noexcept;
+struct PhysicalOptionsButtons { bool valid=false, x=false, y=false; };
+void OpenXRPublishPhysicalOptionsButtons(PhysicalOptionsButtons buttons) noexcept;
+PhysicalOptionsButtons OpenXRReadPhysicalOptionsButtons() noexcept;
+void OpenXRPublishUiSnapshot(const OpenXRUiSnapshot& snapshot) noexcept;
+OpenXRUiSnapshot OpenXRReadUiSnapshot() noexcept;
+void OpenXRSetIntroductionActive(bool active) noexcept;
+bool OpenXRIntroductionActive() noexcept;
+void OpenXRRequestTutorialPause() noexcept;
+bool OpenXRTakeTutorialPause(bool remote) noexcept;
+
 namespace settings_panel {
 
 using wii_remote::HandInputs;
@@ -76,14 +95,12 @@ struct Frame {
     float wheel = 0.0f;
 };
 
-// Whether the button that opens and closes the panel is held. As a Wii Remote
-// that is left Y, which has no Wii button; as a gamepad left Y is GameCube Y, so
-// both thumbsticks clicked together stand in for it.
+// Left X+Y (Index A+B, or the profile's equivalents) opens/closes options.
+// Neither a single item/trick button nor SteamVR's system button opens it.
 inline bool ToggleHeld(const std::array<HandInputs, 2>& hands, OpenXRControllerMode mode) noexcept {
-    if (mode == OpenXRControllerMode::WiiRemote) {
-        return hands[0].secondary;
-    }
-    return hands[0].thumbstick_click && hands[1].thumbstick_click;
+    (void)mode;
+    return (hands[0].primary && hands[0].secondary) ||
+        (hands[0].thumbstick_click && hands[1].thumbstick_click);
 }
 
 // The controller side of the panel, one Update per XR frame:
@@ -103,11 +120,29 @@ public:
     // the previous frame; `mode` is how the game sees the controllers.
     Frame Update(const std::array<HandInputs, 2>& hands, bool& open, float dt_seconds,
                  OpenXRControllerMode mode) noexcept {
-        const bool toggle = ToggleHeld(hands, mode);
+        // Some SteamVR bindings deliver the two face-button edges in separate
+        // samples. Recognize a near-simultaneous pair, not only an exact frame
+        // containing both booleans. A single button still belongs to the game.
+        const float elapsed=std::clamp(dt_seconds,0.0f,0.25f);
+        if(m_toggle_held) {
+            const bool released=!hands[0].primary && !hands[0].secondary &&
+                !hands[0].thumbstick_click && !hands[1].thumbstick_click;
+            m_toggle_release_seconds=released ? m_toggle_release_seconds+elapsed : 0.f;
+            // Native SteamVR and OpenXR can briefly disagree about held buttons.
+            // Rearm only after a stable release, not a single empty sample.
+            if(m_toggle_release_seconds>=.18f) {
+                m_toggle_held=false;
+                m_toggle_release_seconds=0;
+                m_primary_recent=m_secondary_recent=0;
+            }
+        }
+        m_primary_recent=hands[0].primary ? 0.12f : std::max(0.f,m_primary_recent-elapsed);
+        m_secondary_recent=hands[0].secondary ? 0.12f : std::max(0.f,m_secondary_recent-elapsed);
+        const bool toggle = ToggleHeld(hands, mode) || (m_primary_recent>0 && m_secondary_recent>0);
         if (toggle && !m_toggle_held) {
             open = !open;
         }
-        m_toggle_held = toggle;
+        if(toggle) m_toggle_held=true;
 
         if (open && hands[0].menu && !m_menu_held && m_was_open) {
             open = false;
@@ -164,6 +199,8 @@ public:
     }
 
 private:
+    float m_primary_recent=0, m_secondary_recent=0;
+    float m_toggle_release_seconds=0;
     bool m_toggle_held = false;
     bool m_menu_held = false;
     std::array<bool, 2> m_trigger_held{};

@@ -861,6 +861,8 @@ gfx::StereoReplayFrame make_stereo_replay_frame(const AuroraStereoFrame& input, 
     }
     std::memcpy(&view.projection, input.eyes[eye].projection, sizeof(view.projection));
     std::memcpy(&view.viewFromCenter, input.eyes[eye].viewFromCenter, sizeof(view.viewFromCenter));
+    view.handHud = input.handHud;
+    if (input.handHud) std::memcpy(&view.handHudViewFromPanel, input.handHudViewFromPanel[eye], sizeof(view.handHudViewFromPanel));
     if (unitRatio != 1.f) {
       view.viewFromCenter.m0[3] *= unitRatio;
       view.viewFromCenter.m1[3] *= unitRatio;
@@ -881,6 +883,8 @@ gfx::StereoReplayFrame make_stereo_replay_frame(const AuroraStereoFrame& input, 
   }
   return replay;
 }
+
+#include "vr_ui.hpp"
 
 void encode_virtual_screen_eye(wgpu::CommandEncoder& encoder, const webgpu::PresentSource& source, uint32_t eyeIndex) {
   const auto& output = g_stereoEyeTargets[eyeIndex].output();
@@ -1322,6 +1326,8 @@ struct PresentationImage {
   webgpu::TextureWithSampler texture;
   wgpu::BindGroup bindGroup;
 };
+std::shared_ptr<PresentationImage> g_retainedMenuImage;
+AuroraVRUiGuide g_retainedMenuGuide{};
 
 struct PresentationJob {
   std::shared_ptr<PresentationImage> image;
@@ -1822,8 +1828,19 @@ void shutdown() noexcept {
   }
   g_stereoEyeTargets = {};
   g_stereoMirrorState.Reset();
+  g_retainedMenuImage.reset();
+  g_retainedMenuGuide = {};
   g_presentationImagePools = {};
   stereo_overlay::shutdown();
+  {
+    std::lock_guard lock(vrui::mutex);
+    vrui::pipeline = nullptr;
+    vrui::panoramaBinding = nullptr;
+    vrui::panoramaView = nullptr;
+    vrui::panorama = nullptr;
+    vrui::controllerTextures.clear();
+    vrui::activeQuality = -1;
+  }
   imgui::shutdown();
   gfx::shutdown();
   webgpu::shutdown();
@@ -1931,6 +1948,7 @@ bool begin_frame_render_state_impl(ImGuiFramePolicy imguiPolicy, bool* imguiNewF
 // Everything the mutex-free encode phase needs, latched while the renderer GPU mutex is held.
 // None of it may be re-read from a global later; the producer has already begun the next frame.
 struct SealedFrameContext {
+  AuroraVRUiGuide uiGuide{};
   wgpu::CommandEncoder encoder; // slot 0's encoder; already holds the staging copies
   webgpu::PresentSource presentSource{};
   std::optional<gfx::StereoReplayFrame> stereoReplay;
@@ -1986,11 +2004,41 @@ gfx::StereoReplayFrame interpolated_stereo_frame(const AuroraStereoFrame& input,
 
 void run_retained_stereo_frame(gfx::SealedFrame& sealedFrame) noexcept {
   std::lock_guard gpuLock(g_rendererGpuMutex);
-  if (!gx::stereo_frame_interpolation_active() || !gfx::has_late_stereo_replay(sealedFrame))
-    return;
+  if (!gx::stereo_frame_interpolation_active() ||
+      (!g_retainedMenuImage && !gfx::has_late_stereo_replay(sealedFrame))) return;
   const auto input = request_stereo_frame(g_retainedStereo.logicalFrame, g_retainedStereo.contentTag);
-  if (!input || input->mode != AURORA_STEREO_FRAME_IMMERSIVE_REPLAY)
+  if (!input) return;
+  if (input->mode == AURORA_STEREO_FRAME_VIRTUAL_SCREEN && g_retainedMenuImage) {
+    auto encoder=g_device.CreateCommandEncoder();
+    const auto& image=*g_retainedMenuImage;
+    const webgpu::PresentSource mono{.bindGroup=image.bindGroup,.texture=image.texture.texture,
+      .size=image.texture.size,.format=image.texture.format};
+    for(uint32_t eye=0;eye<AURORA_STEREO_EYE_COUNT;++eye) {
+      ensure_stereo_eye_target(eye,input->eyes[eye].width,input->eyes[eye].height);
+      if(input->ui.anchored) {
+        auto frame=*input;webgpu::PresentSource panel{};
+        const bool guide=g_retainedMenuGuide.active && stereo_overlay::prepared_source(panel);
+        if(guide) frame.ui.width*=.75f;
+        vrui::render(encoder,guide?panel:mono,frame,guide?g_retainedMenuGuide:AuroraVRUiGuide{},eye);
+        if(!guide) {
+          Mat4x4<float> projection;Mat3x4<float> view;
+          std::memcpy(&projection,frame.eyes[eye].projection,sizeof(projection));
+          std::memcpy(&view,frame.ui.eyeFromPanel[eye],sizeof(view));
+          stereo_overlay::composite_immersive(encoder,g_stereoEyeTargets[eye].output().view,projection,view,eye);
+        }
+      } else {
+        encode_virtual_screen_eye(encoder,mono,eye);
+        const auto& output=g_stereoEyeTargets[eye].output();
+        stereo_overlay::composite_flat(encoder,output.view,output.size,eye);
+      }
+    }
+    const auto sink=run_stereo_sink(encoder,input->frameToken,g_retainedStereo.logicalFrame,input->mode);
+    const auto buffer=encoder.Finish();std::lock_guard submitLock(g_queueSubmitMutex);
+    g_queue.Submit(1,&buffer);
+    if(sink && sink->submitted) sink->submitted(sink->frame,sink->userdata);
     return;
+  }
+  if(input->mode != AURORA_STEREO_FRAME_IMMERSIVE_REPLAY || !gfx::has_late_stereo_replay(sealedFrame)) return;
   float weight;
   auto replay = interpolated_stereo_frame(*input, weight);
   auto encoder = g_device.CreateCommandEncoder();
@@ -2029,6 +2077,9 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx, u
   // pre-first-frame UINT32_MAX value to logical frame zero.
   ctx.logicalFrame = gfx::current_frame() + 1;
   gfx::set_stereo_local_player_count(sceneAnchor.localPlayerCount);
+  // UI content advances with the game producer, even when the retained-frame
+  // presenter already consumed this interval's XR request.
+  { std::lock_guard lock(vrui::mutex); ctx.uiGuide=vrui::guide; }
   if (const auto stereoInput = request_stereo_frame(ctx.logicalFrame, contentTag)) {
     ctx.stereoInput = stereoInput;
     ctx.stereoFrameToken = stereoInput->frameToken;
@@ -2245,21 +2296,57 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, 
     publish_stereo_screen_aspects(ctx.presentSource, finalImage->texture.size, immersiveReplay);
   }
 
+  // Keep a completed snapshot across race/menu transitions too. Consuming a
+  // virtual-screen packet while the previous frame was immersive must still
+  // submit it; dropping it strands the acquired headset image.
+  // The headset background must not alias the desktop presentation image:
+  // mirror/black output can overwrite that image after the eyes sampled it.
+  // Refresh on EVERY game frame while XR is active, including frames without
+  // an XR request: run_retained_stereo_frame can consume that request first.
+  // Gating this on stereoOutput leaves the presenter replaying a stale (often
+  // startup-black) image indefinitely, until recentering changes the timing.
+  if (stereo_frame_provider_active()) {
+    auto background=acquire_presentation_image(0,ctx.snapshotWidth,ctx.snapshotHeight);
+    // Always sample the mono game source. Desktop ImGui is drawn separately
+    // into the VR panel; including it only on frames with an XR request would
+    // make the background alternate between game and desktop settings.
+    encode_presentation_snapshot(encoder,ctx.presentSource,*background,false,MirrorPlan::Mono);
+    g_retainedMenuImage=std::move(background);
+    static bool independentMenuRefreshLogged = false;
+    if (!stereoOutput && !independentMenuRefreshLogged) {
+      Log.info("VR menu source refreshed without an XR request; retained presentation follows live game frames");
+      independentMenuRefreshLogged = true;
+    }
+  }
+  g_retainedMenuGuide=ctx.uiGuide;
   if (virtualScreenNeedsMono) {
-    // Use the completed mono snapshot so virtual-screen XR includes ImGui at
-    // the same scale and aspect as the desktop presentation. Rendering the
-    // same ImGui draw data directly into differently-sized eye textures would
-    // make the backend restore the desktop-sized viewport.
+    // The completed game image is the background. VR settings and tutorials
+    // have their own panel texture and are composited below.
+    const auto& background=g_retainedMenuImage ? *g_retainedMenuImage : *finalImage;
     const webgpu::PresentSource completedMono{
-        .bindGroup = finalImage->bindGroup,
-        .texture = finalImage->texture.texture,
-        .size = finalImage->texture.size,
-        .format = finalImage->texture.format,
+        .bindGroup = background.bindGroup,
+        .texture = background.texture.texture,
+        .size = background.texture.size,
+        .format = background.texture.format,
     };
     for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
-      encode_virtual_screen_eye(encoder, completedMono, eye);
       const auto& output = g_stereoEyeTargets[eye].output();
-      stereo_overlay::composite_flat(encoder, output.view, output.size, eye);
+      if (ctx.stereoInput && ctx.stereoInput->ui.anchored) {
+        auto frame=*ctx.stereoInput;
+        webgpu::PresentSource panelSource{};
+        const bool guide=ctx.uiGuide.active && stereo_overlay::prepared_source(panelSource);
+        if (guide) frame.ui.width *= .75f;
+        vrui::render(encoder,guide ? panelSource : completedMono,frame,guide ? ctx.uiGuide : AuroraVRUiGuide{},eye);
+        if (!guide) {
+          Mat4x4<float> projection; Mat3x4<float> view;
+          std::memcpy(&projection,frame.eyes[eye].projection,sizeof(projection));
+          std::memcpy(&view,frame.ui.eyeFromPanel[eye],sizeof(view));
+          stereo_overlay::composite_immersive(encoder,output.view,projection,view,eye);
+        }
+      } else {
+        encode_virtual_screen_eye(encoder, completedMono, eye);
+        stereo_overlay::composite_flat(encoder, output.view, output.size, eye);
+      }
       // An immersive packet that could not be replayed still goes out as a windowed layer.
       if (ctx.stereoReplay->window) {
         gfx::mask_stereo_eye_output(sealedFrame, encoder, *ctx.stereoReplay, eye, output.view, output.size);
@@ -3024,3 +3111,34 @@ void aurora_set_background_input(bool value) {
 }
 void aurora_set_display_mode(AuroraDisplayMode mode) { aurora::window::set_display_mode(mode); }
 AuroraDisplayMode aurora_get_display_mode() { return aurora::window::get_display_mode(); }
+
+void aurora_set_vr_controller_model(uint32_t hand,const AuroraVRControllerVertex* triangles,uint32_t count) {
+  if(hand>=2 || count>300000 || count%3!=0) return;
+  std::lock_guard lock(aurora::vrui::mutex);
+  if(triangles&&count) aurora::vrui::models[hand].assign(triangles,triangles+count);
+  else aurora::vrui::models[hand].clear();
+}
+float aurora_get_vr_panel_aspect(void) {
+  return aurora::vrui::panelAspect.load(std::memory_order_relaxed);
+}
+void aurora_set_vr_controller_texture(uint32_t material,uint32_t width,uint32_t height,const uint8_t* rgba) {
+  if(!material || !rgba || !width || !height || width>8192 || height>8192) return;
+  std::lock_guard lock(aurora::vrui::mutex);
+  auto& texture=aurora::vrui::controllerTextures[material];
+  if(texture.binding || !texture.pixels.empty()) return;
+  texture.width=width;texture.height=height;
+  texture.pixels.assign(rgba,rgba+size_t(width)*height*4);
+}
+void aurora_set_vr_controller_anchors(uint32_t hand,const float* positions) {
+  if(hand>=2 || !positions) return;
+  std::lock_guard lock(aurora::vrui::mutex);
+  for(int row=0;row<5;++row) for(int axis=0;axis<3;++axis)
+    aurora::vrui::anchors[hand][row][axis]=positions[row*3+axis];
+}
+void aurora_set_vr_menu_shader_quality(int quality) {
+  aurora::vrui::requestedQuality.store(std::clamp(quality,0,3),std::memory_order_relaxed);
+}
+void aurora_set_vr_ui_guide(const AuroraVRUiGuide* guide) {
+  std::lock_guard lock(aurora::vrui::mutex);
+  aurora::vrui::guide=guide?*guide:AuroraVRUiGuide{};
+}

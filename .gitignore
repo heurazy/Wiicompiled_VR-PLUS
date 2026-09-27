@@ -84,3 +84,5 @@ output.txt
 /android/app/.cxx/
 /android/app/libs/*.aar
 /android/.runs/
+# Local patched launcher build, reproducible from integrations/wheelwizard-vr.patch.
+/integrations/wheelwizard-work/

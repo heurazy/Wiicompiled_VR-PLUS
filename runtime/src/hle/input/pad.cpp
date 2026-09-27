@@ -1,3 +1,5 @@
+#include "vr/openxr_settings_panel.h"
+#include "runtime_config.h"
 #include "hle_stubs.h"
 #include "memory.h"
 #include "hle/controller_status_contract.h"
@@ -130,6 +132,13 @@ extern "C" uint32_t PAD__Read_HLE(uint32_t statusPtr)
 
     FillTriggersHeldByButtons(statuses);
     InputBindings::Apply(statuses);
+    const auto vrControls=mkw::vr::OpenXRReadPortControls();
+    if(vrControls.active && mkw::vr::OpenXRGetControllerMode()==mkw::vr::OpenXRControllerMode::Gamepad) {
+        static mkw::vr::QuestPadFilter filter;
+        const auto& config=RuntimeConfigFile::Get();
+        statuses[0]=filter.Apply(mkw::vr::MapQuestInput(vrControls,config.vrStickCalibration,config.vrButtonMapping),InputBindings::InputBlocked());
+    }
+
     // A USB wheel is player 1's GameCube controller: it owns port 0 in a race
     // and adds its buttons to it in menus. It advertises port 0's rumble.
     if (physical_wheel::ReadPad(statuses[0], InputBindings::InputBlocked(),
@@ -137,6 +146,10 @@ extern "C" uint32_t PAD__Read_HLE(uint32_t statusPtr)
         rumbleMask |= PAD_CHAN0_BIT;
     }
 
+    if (mkw::vr::OpenXRGetControllerMode()==mkw::vr::OpenXRControllerMode::Gamepad &&
+        mkw::vr::OpenXRTakeTutorialPause(false)) {
+        statuses[0]={}; statuses[0].err=PAD_ERR_NONE; statuses[0].button=PAD_BUTTON_START;
+    }
     try {
         for (uint32_t i = 0; i < PAD_CHANMAX; ++i) {
             WritePadStatus(statusPtr + static_cast<uint32_t>(i * PadStatusContract::kGuestStatusSize),

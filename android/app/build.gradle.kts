@@ -27,6 +27,10 @@ val prepareRuntimeResources by tasks.registering(Copy::class) {
     from(File(assets, "wii")) { into("runtime_resources/wii_bootstrap") }
     from(File(assets, "dsp/dsp_coef.bin")) { into("runtime_resources") }
     from(File(assets, "pipeline/initial_pipeline_cache.db")) { into("runtime_resources") }
+    from(File(assets, "quest_touch_plus")) {
+        include("*.wccontroller", "*.rgba", "LICENSE.md", "SOURCE.md")
+        into("runtime_resources/quest_touch_plus")
+    }
     into(runtimeResources)
 }
 
@@ -103,8 +107,8 @@ android {
         // Quest 2 ships Android 10 (API 29); AHardwareBuffer/Vulkan 1.1 need 26+.
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.4.0-quest"
+        versionCode = 5
+        versionName = "1.1.1-quest3-preview"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         for ((name, value) in discPins) {
@@ -150,6 +154,9 @@ android {
             // aurora-main needs CMake 3.25+, newer than the SDK's bundled 3.22.1;
             // Build-Quest.ps1 points cmake.dir in local.properties at a system CMake.
             path = file("src/main/cpp/CMakeLists.txt")
+            System.getenv("MKW_ANDROID_NATIVE_BUILD_DIR")?.let {
+                buildStagingDirectory = file(it)
+            }
         }
     }
 
@@ -217,12 +224,13 @@ abstract class ExportQuestGameKit : DefaultTask() {
             .maxByOrNull { it.lastModified() }
             ?: throw GradleException("No libmkw_quest_kit_probe.so; the native build did not produce the game kit probe")
         val configuration = probe.parentFile.parentFile.parentFile // <BuildType>/<hash>
-        val binaryDir = File(app, ".cxx/${configuration.parentFile.name}/${configuration.name}/arm64-v8a")
+        val stagingDir = System.getenv("MKW_ANDROID_NATIVE_BUILD_DIR")?.let(::File) ?: File(app, ".cxx")
+        val binaryDir = File(stagingDir, "${configuration.parentFile.name}/${configuration.name}/arm64-v8a")
         if (!File(binaryDir, "build.ninja").isFile) throw GradleException("No CMake tree at $binaryDir")
         val kitDir = File(outputDir.get().asFile, "game_kit")
         execOperations.exec {
             commandLine(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.get().asFile.path,
+                System.getenv("MKW_POWERSHELL") ?: "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.get().asFile.path,
                 "-CMakeBinaryDir", binaryDir.path, "-OutputDir", kitDir.path, "-LlvmStrip", llvmStrip.get().asFile.path,
             )
         }
@@ -255,7 +263,7 @@ abstract class PrepareQuestToolchain : DefaultTask() {
     fun prepare() {
         execOperations.exec {
             commandLine(
-                "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.get().asFile.path,
+                System.getenv("MKW_POWERSHELL") ?: "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script.get().asFile.path,
                 "-OutputDir", File(outputDir.get().asFile, "quest_toolchain").path, "-NdkLlvm", ndkLlvm.get().asFile.path,
             )
         }

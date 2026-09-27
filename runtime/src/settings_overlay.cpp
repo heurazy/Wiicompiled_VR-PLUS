@@ -17,6 +17,15 @@
 #include "vr/openxr_diagnostics.h"
 #include "vr/openxr_integration.h"
 #include "vr/openxr_settings_panel.h"
+#include "isa/ppc_isa_context.h"
+#include "memory.h"
+#if defined(_WIN32)
+#define OPENVR_API_NODLL
+#define USE_SDL
+#include "vr/openvr_capi.h"
+#undef USE_SDL
+#endif
+extern "C" void func_80554E14(CpuContext* context);
 #include "vr/openxr_wii_remote.h"
 #include "wii_remote_input.h"
 
@@ -42,6 +51,8 @@
 #include <cmath>
 #include <cstdint>
 #include <exception>
+#include <fstream>
+#include <cstdlib>
 #include <limits>
 #include <iostream>
 #include <mutex>
@@ -1268,13 +1279,14 @@ void DrawGraphicsSettings() {
             "Requests the closest native-resolution display mode to the output frame "
             "rate (60 Hz, or the frame interpolation target).");
     }
+#ifndef __ANDROID__
     constexpr std::array<const char*, 3> kFrameInterpolationModes{
         "Off", "120 FPS", "180 FPS",
     };
     const char* currentFrameInterpolationMode =
         kFrameInterpolationModes[static_cast<size_t>(g_frameInterpolationMode)];
     bool frameInterpolationModeChanged = false;
-    if (ImGui::BeginCombo("Race frame interpolation (experimental)", currentFrameInterpolationMode)) {
+    if (ImGui::BeginCombo("Desktop frame interpolation (experimental)", currentFrameInterpolationMode)) {
         for (int mode = 0; mode < static_cast<int>(kFrameInterpolationModes.size()); ++mode) {
             const bool selected = g_frameInterpolationMode == mode;
             if (ImGui::Selectable(kFrameInterpolationModes[static_cast<size_t>(mode)], selected)) {
@@ -1300,6 +1312,7 @@ void DrawGraphicsSettings() {
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + Scaled(380.0f));
     ImGui::TextDisabled("Frame interpolation is experimental, you might find visual artifacts");
     ImGui::PopTextWrapPos();
+#endif
     if (ImGui::Checkbox("Disable copy filter", &g_disableCopyFilter)) {
         aurora_set_disable_copy_filter(g_disableCopyFilter);
         RuntimeConfigFile::SetDisableCopyFilter(g_disableCopyFilter);
@@ -1351,11 +1364,12 @@ void DrawVrSettings() {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip(
             "Opens these settings on a panel in front of you, in menus and races alike.\n"
-            "In the headset, left Y opens and closes it too (with Gamepad VR controllers,\n"
-            "click both thumbsticks together instead).\n"
+            "In the headset, press left X + Y (Index: left A + B), or click both sticks to open or close it.\n"
             "Aim at it and pull a trigger to change a setting; push a thumbstick to scroll.\n"
-            "While it is open the game does not see the VR controllers.");
+            "During a race, opening it requests pause; closing it resumes only a pause it started.");
     }
+    if(ImGui::Checkbox("Search for Wii Remotes automatically (may cause stutter)",&g_wiiContinuousScan))
+        RuntimeConfigFile::SetWiiContinuousScanEnabled(g_wiiContinuousScan);
     if (ImGui::Combo("VR controllers", &g_vrControllerMode, kVrControllerModeLabels.data(),
                      static_cast<int>(kVrControllerModeLabels.size()))) {
         mkw::vr::OpenXRSetControllerMode(static_cast<mkw::vr::OpenXRControllerMode>(g_vrControllerMode));
@@ -1368,7 +1382,8 @@ void DrawVrSettings() {
             "  Right: A = A, trigger = B, B = C (look behind), stick up/down = 1/2\n"
             "  Left: stick = Nunchuk stick, trigger = Z, X = -, menu = +, Y = settings panel\n"
             "  The grips press nothing; they take hold of the wheel with hand steering.\n"
-            "Gamepad: both controllers are one ordinary controller, read as a GameCube pad.\n"
+            "Gamepad (recommended): our VR driving controls, including hand steering, "
+            "left trigger brake/reverse, X tricks and Y items.\n"
             "Applies immediately; the game sees the controller change as a reconnection.");
     }
     if (mkw::vr::OpenXRIsRunning() &&
@@ -1385,6 +1400,7 @@ void DrawVrSettings() {
         }
     }
 
+#ifndef __ANDROID__
     if (ImGui::Combo("VR frame interpolation (experimental)", &g_vrFrameInterpolationMode,
                      kVrInterpolationLabels.data(), static_cast<int>(kVrInterpolationLabels.size()))) {
         const auto target = kVrInterpolationFps[static_cast<size_t>(g_vrFrameInterpolationMode)];
@@ -1398,6 +1414,9 @@ void DrawVrSettings() {
             "The game stays at 60 Hz. Adds one game frame of scene latency; head tracking stays current. "
             "Needs GPU headroom and may show interpolation artifacts. Applies immediately.");
     }
+#else
+    ImGui::TextDisabled("Frame interpolation is disabled on Quest.");
+#endif
     const auto xrTiming = mkw::vr::OpenXRGetFrameTiming();
     if (mkw::vr::OpenXRIsRunning()) {
         ImGui::TextDisabled("Headset: %.1f Hz | New VR frames: %.1f FPS", xrTiming.headset_hz, xrTiming.rendered_fps);
@@ -1409,6 +1428,7 @@ void DrawVrSettings() {
     // Like the mirror above and unlike the enable toggle, these two apply to the
     // very next frame, so they can be compared from inside a running race.
     ImGui::Separator();
+    if (ImGui::CollapsingHeader("Advanced eye replay diagnostics")) {
     ImGui::Text("VR eye replay (EFB)");
     if (ImGui::Checkbox("Stop eye at display copy", &g_vrStopAtDisplayCopy)) {
         aurora_set_stereo_stop_at_display_copy(g_vrStopAtDisplayCopy);
@@ -1445,6 +1465,7 @@ void DrawVrSettings() {
             "Keeps drawing each eye in the render pass it has open across the frame's GX "
             "copies, which only the desktop image performs, and skips what a later clear "
             "erases. Same picture, less GPU memory traffic; turn off to compare.");
+    }
     }
     ImGui::Separator();
     ImGui::Text("VR 2D layer");
@@ -1544,6 +1565,38 @@ void DrawVrSettings() {
     }
 #endif
     ImGui::Separator();
+    auto& portConfig=RuntimeConfigFile::Mutable();
+#if defined(_WIN32)
+    if(ImGui::Checkbox("Use SteamVR (next launch)",&portConfig.vrForceSteamVr))
+        RuntimeConfigFile::WriteSetting("vr","force_steamvr",portConfig.vrForceSteamVr?"true":"false");
+#endif
+    if(ImGui::Checkbox("Adaptive resolution (experimental)",&portConfig.vrAdaptiveResolution))
+        RuntimeConfigFile::WriteSetting("vr","adaptive_resolution",portConfig.vrAdaptiveResolution?"true":"false");
+    float eyeScale=RuntimeConfigFile::VrRenderScale();
+    if(ImGui::SliderFloat("Resolution per eye (next launch)",&eyeScale,.25f,2.f,"%.2fx") &&
+       RuntimeConfigFile::WriteSetting("vr","render_scale",std::to_string(eyeScale)))
+        portConfig.vrRenderScale=eyeScale;
+    ImGui::TextDisabled("Internal resolution varies from 70 to 100 percent; game speed stays unchanged.");
+    if(ImGui::CollapsingHeader("VR stick calibration and buttons")) {
+        auto& stick=portConfig.vrStickCalibration;
+        const auto saveSlider=[](const char* label,const char* key,float& value,float low,float high) {
+            if(ImGui::SliderFloat(label,&value,low,high,"%.2f")) RuntimeConfigFile::WriteSetting("vr",key,std::to_string(value));
+        };
+        saveSlider("Deadzone","stick_deadzone",stick.deadzone,0,.4f);
+        saveSlider("Outer range","stick_outer",stick.outer,.6f,1);
+        saveSlider("Centre X","stick_center_x",stick.center_x,-.3f,.3f);
+        saveSlider("Centre Y","stick_center_y",stick.center_y,-.3f,.3f);
+        if(ImGui::Button("Calibrate centre (release left stick)")) {
+            const auto controls=mkw::vr::OpenXRReadPortControls();
+            stick.center_x=std::clamp(controls.raw_steering_x,-.3f,.3f);stick.center_y=std::clamp(controls.raw_steering_y,-.3f,.3f);
+            RuntimeConfigFile::WriteSetting("vr","stick_center_x",std::to_string(stick.center_x));
+            RuntimeConfigFile::WriteSetting("vr","stick_center_y",std::to_string(stick.center_y));
+        }
+        if(ImGui::Checkbox("Swap item and trick",&portConfig.vrButtonMapping.swapItemTrick))
+            RuntimeConfigFile::WriteSetting("vr","swap_item_trick",portConfig.vrButtonMapping.swapItemTrick?"true":"false");
+        if(ImGui::Checkbox("Swap cockpit drift and brake",&portConfig.vrButtonMapping.swapCockpitDriftBrake))
+            RuntimeConfigFile::WriteSetting("vr","swap_cockpit_drift_brake",portConfig.vrButtonMapping.swapCockpitDriftBrake?"true":"false");
+    }
     ImGui::Text("VR camera");
     if (ImGui::Combo("Race view", &g_vrRaceView, kVrRaceViewLabels.data(),
                      static_cast<int>(kVrRaceViewLabels.size()))) {
@@ -1565,21 +1618,53 @@ void DrawVrSettings() {
     }
     // Everything below shapes the immersive race view, which Flat Screen mode replaces.
     ImGui::BeginDisabled(g_vrFlatScreen);
-    if (ImGui::Checkbox("First-person camera", &g_vrFirstPerson)) {
-        RuntimeConfigFile::SetVrFirstPerson(g_vrFirstPerson);
-        mkw::vr::MkwVRFirstPersonApplyConfiguredSettings();
+    int camera=static_cast<int>(mkw::vr::MkwVRGetCameraMode());
+    g_vrFirstPerson=camera==1;
+    const char* cameras[]{"Original / third person","First person","Diorama"};
+    if(ImGui::Combo("Race camera",&camera,cameras,3)) {
+        mkw::vr::MkwVRSetCameraMode(static_cast<mkw::vr::CameraMode>(camera));
+        g_vrFirstPerson=camera==1;
     }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Also toggled by clicking the right thumbstick, on the VR controllers or on a gamepad.");
+    int defaultCamera=RuntimeConfigFile::Get().vrDefaultCamera;
+    if(ImGui::Combo("Default camera",&defaultCamera,cameras,3) &&
+        RuntimeConfigFile::WriteSetting("vr","default_camera",std::to_string(defaultCamera)))
+        RuntimeConfigFile::Mutable().vrDefaultCamera=defaultCamera;
+    auto& config=RuntimeConfigFile::Mutable();
+    const auto slider=[&](const char* label,const char* key,float& value,float low,float high) {
+        if(ImGui::SliderFloat(label,&value,low,high,"%.0f")) RuntimeConfigFile::WriteSetting("vr",key,std::to_string(value));
+    };
+    if(ImGui::CollapsingHeader("Diorama camera")) {
+        slider("Distance","diorama_distance",config.vrDioramaDistance,200,5000);
+        slider("Height","diorama_height",config.vrDioramaHeight,50,4000);
+        slider("World scale","diorama_units_per_meter",config.vrDioramaUnitsPerMeter,50,2000);
+        if(ImGui::Button("Reset Diorama")) {
+            config.vrDioramaDistance=1200;config.vrDioramaHeight=900;config.vrDioramaUnitsPerMeter=500;
+            RuntimeConfigFile::WriteSetting("vr","diorama_distance","1200");
+            RuntimeConfigFile::WriteSetting("vr","diorama_height","900");
+            RuntimeConfigFile::WriteSetting("vr","diorama_units_per_meter","500");
+        }
     }
-    if (ImGui::Checkbox("Right thumbstick click toggles it", &g_vrFirstPersonToggleClick)) {
+    if(ImGui::Checkbox("Race HUD on left hand",&config.vrHandHud))
+        RuntimeConfigFile::WriteSetting("vr","hand_hud",config.vrHandHud?"true":"false");
+    ImGui::TextDisabled("The cockpit keeps the HUD in front of the seat. Tracking loss restores the forward HUD.");
+    const char* quality[]{"Off","Low","Balanced","High"};
+    if(ImGui::Combo("Menu shader quality",&config.vrMenuShaderQuality,quality,4)) {
+        RuntimeConfigFile::WriteSetting("vr","menu_shader_quality",std::to_string(config.vrMenuShaderQuality));
+        aurora_set_vr_menu_shader_quality(config.vrMenuShaderQuality);
+    }
+    if(ImGui::Button("Show introduction and controls again")) {
+        if(RuntimeConfigFile::WriteSetting("vr","welcome_complete","false") &&
+           RuntimeConfigFile::WriteSetting("vr","tutorial_completed","0")) {
+            config.vrWelcomeComplete=false;config.vrTutorialCompleted=0;
+            mkw::vr::OpenXRSetSettingsPanelOpen(false);
+        }
+    }
+    if (ImGui::Checkbox("Right thumbstick click cycles cameras", &g_vrFirstPersonToggleClick)) {
         RuntimeConfigFile::SetVrFirstPersonToggleClick(g_vrFirstPersonToggleClick);
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Moves the camera to the Player 1 driver's head and keeps the horizon level, "
-            "instead of riding behind the kart. Applies during a single-screen race; menus "
-            "and split-screen are unaffected.");
+            "Cycles Original, First person and Diorama. Clicking both sticks opens VR settings.");
     }
     constexpr std::array<const char*, 2> kSeatLabels{"Cockpit", "Custom"};
     if (ImGui::Combo("Seat", &g_vrFirstPersonSeat, kSeatLabels.data(), static_cast<int>(kSeatLabels.size()))) {
@@ -1640,6 +1725,7 @@ void DrawVrSettings() {
     ImGui::PopTextWrapPos();
     ImGui::EndDisabled();
     constexpr std::array<const char*, 3> kRotationLabels{"Yaw only", "Yaw + Pitch", "Full rotation"};
+    ImGui::BeginDisabled(g_vrFirstPersonSeat == 0 && RuntimeConfigFile::VrFirstPersonFollowVehicleMotion());
     if (ImGui::Combo("View rotation", &g_vrFirstPersonRotation, kRotationLabels.data(),
                      static_cast<int>(kRotationLabels.size()))) {
         RuntimeConfigFile::SetVrFirstPersonRotation(
@@ -1654,6 +1740,9 @@ void DrawVrSettings() {
             "kart's whole orientation, banking included. The headset always adds free look "
             "on top.");
     }
+    ImGui::EndDisabled();
+    if (g_vrFirstPersonSeat == 0 && RuntimeConfigFile::VrFirstPersonFollowVehicleMotion())
+        ImGui::TextDisabled("Vehicle motion detail controls cockpit rotation while enabled.");
     bool followVehicleMotion = RuntimeConfigFile::VrFirstPersonFollowVehicleMotion();
     ImGui::BeginDisabled(g_vrFirstPersonSeat != 0);
     if (ImGui::Checkbox("Follow vehicle motion in first person", &followVehicleMotion)) {
@@ -1677,36 +1766,22 @@ void DrawVrSettings() {
         ImGui::TextDisabled("Vehicle motion applies to the cockpit seat.");
     else
         ImGui::TextWrapped("Safe eases into sustained slopes and ignores small bumps. Full follows impacts and tricks.");
-    // Two presentations of one setting: which models go, or none at all.
-    // Ticking either replaces the other, and unticking both shows everything.
-    const auto applyHiding = [](bool enabled, int model) {
-        g_vrFirstPersonHideDriver = enabled;
-        if (enabled) {
-            g_vrFirstPersonHiddenModel = model;
-            RuntimeConfigFile::SetVrFirstPersonHiddenModel(model);
-        }
-        RuntimeConfigFile::SetVrFirstPersonHideDriver(enabled);
+    int visibility=!g_vrFirstPersonHideDriver?0:g_vrFirstPersonHiddenModel<0?2:1;
+    constexpr const char* visibilityLabels[]{"Show driver and vehicle","Hide driver","Hide driver and vehicle"};
+    if(ImGui::Combo("Cockpit visibility",&visibility,visibilityLabels,3)) {
+        g_vrFirstPersonHideDriver=visibility!=0;
+        g_vrFirstPersonHiddenModel=visibility==2?-1:RuntimeConfigFile::kVrFirstPersonHiddenModelDefault;
+        RuntimeConfigFile::SetVrFirstPersonHiddenModel(g_vrFirstPersonHiddenModel);
+        RuntimeConfigFile::SetVrFirstPersonHideDriver(g_vrFirstPersonHideDriver);
         mkw::vr::MkwVRFirstPersonApplyConfiguredSettings();
-    };
-    bool hideDriver = g_vrFirstPersonHideDriver && g_vrFirstPersonHiddenModel >= 0;
-    bool hideDriverAndKart = g_vrFirstPersonHideDriver && g_vrFirstPersonHiddenModel < 0;
-    if (ImGui::Checkbox("Hide driver", &hideDriver)) {
-        applyHiding(hideDriver, RuntimeConfigFile::kVrFirstPersonHiddenModelDefault);
     }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "Removes your character and leaves the kart around you. Their head would "
-            "otherwise be where your eyes are. Other racers are unaffected.");
-    }
-    if (ImGui::Checkbox("Hide driver and kart", &hideDriverAndKart)) {
-        applyHiding(hideDriverAndKart, -1);
-    }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Removes the vehicle as well, leaving nothing of your own kart.");
-    }
+    if(ImGui::IsItemHovered())
+        ImGui::SetTooltip("Controls your own models in first person. Other racers are unaffected.");
     DrawVrSteeringWheelSettings();
     ImGui::Separator();
     if (ImGui::Button("Reset first-person defaults")) {
+        RuntimeConfigFile::SetVrFirstPersonFollowVehicleMotion(RuntimeConfigFile::kVrFirstPersonFollowVehicleMotionDefault);
+        RuntimeConfigFile::SetVrFirstPersonMotionLevel(static_cast<int>(mkw::vr::FirstPersonMotionLevel::Safe));
         g_vrFirstPersonSeat = 0;
         g_vrCockpitUnitsPerMeter = RuntimeConfigFile::kVrCockpitUnitsPerMeterDefault;
         g_vrSteeringWheel = RuntimeConfigFile::kVrSteeringWheelDefault;
@@ -1746,9 +1821,9 @@ void ToggleFirstPersonCamera() {
     if (g_vrFlatScreen) {
         return;
     }
-    g_vrFirstPerson = !g_vrFirstPerson;
-    RuntimeConfigFile::SetVrFirstPerson(g_vrFirstPerson);
-    mkw::vr::MkwVRFirstPersonApplyConfiguredSettings();
+    if (mkw::vr::MkwVRRaceIntroActive()) return;
+    mkw::vr::MkwVRSetCameraMode(mkw::vr::NextCameraMode(mkw::vr::MkwVRGetCameraMode()));
+    g_vrFirstPerson=mkw::vr::MkwVRGetCameraMode()==mkw::vr::CameraMode::FirstPerson;
     RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] first-person camera " << (g_vrFirstPerson ? "on" : "off")
                            << " (right thumbstick click)" << std::endl;
 }
@@ -2269,6 +2344,8 @@ ImGuiContext* CreateVrSettingsPanelContext() {
     return context;
 }
 
+#include "vr/onboarding_overlay.inl"
+
 void DrawVrSettingsPanelWindow() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->Pos, ImGuiCond_Always);
@@ -2289,10 +2366,7 @@ void DrawVrSettingsPanelWindow() {
             mkw::vr::OpenXRSetSettingsPanelOpen(false);
         }
         ImGui::TextDisabled("Aim and pull a trigger to change a setting, push a thumbstick to scroll.");
-        ImGui::TextDisabled("%s to close. The game does not see the controllers meanwhile.",
-                            mkw::vr::OpenXRGetControllerMode() == mkw::vr::OpenXRControllerMode::WiiRemote
-                                ? "Press left Y or Menu"
-                                : "Click both thumbsticks or press Menu");
+    ImGui::TextDisabled("Left X + Y or both stick clicks: toggle. Menu: close. Race pause is requested while open.");
         ImGui::Separator();
         if (ImGui::BeginTabBar("Settings")) {
             const auto tab = [](const char* label, void (*draw)()) {
@@ -2319,11 +2393,10 @@ void DrawVrSettingsPanelWindow() {
     ImGui::End();
 }
 
-// Called once per presented frame after the desktop menus, with the frame
-// worker done: the draw data handed to Aurora must stay put until the next
-// frame is encoded, and only the next call here rebuilds it.
+// Called after the desktop menus. Aurora snapshots the panel draw lists;
+// the GPU worker may still be encoding the previous frame concurrently.
 void DrawVrSettingsPanel() {
-    if (!mkw::vr::OpenXRIsRunning() || !mkw::vr::OpenXRSettingsPanelOpen()) {
+    if (!mkw::vr::OpenXRIsRunning() || !(mkw::vr::OpenXRSettingsPanelOpen() || mkw::vr::OpenXRIntroductionActive())) {
         aurora_imgui_set_stereo_overlay(nullptr, 0.0f);
         return;
     }
@@ -2357,7 +2430,7 @@ void DrawVrSettingsPanel() {
         io.AddMouseWheelEvent(0.0f, pointer.wheel);
     }
     ImGui::NewFrame();
-    DrawVrSettingsPanelWindow();
+    if(g_introductionKind) DrawIntroductionWindow(); else DrawVrSettingsPanelWindow();
     ImGui::Render();
     ImDrawData* const drawData = ImGui::GetDrawData();
     ImGui::SetCurrentContext(desktop);
@@ -2366,6 +2439,7 @@ void DrawVrSettingsPanel() {
 } // namespace
 
 void InitializeRuntimeSettings() noexcept {
+    aurora_set_vr_menu_shader_quality(RuntimeConfigFile::Get().vrMenuShaderQuality);
 #if defined(__ANDROID__)
     // ImGui_ImplSDL3_NewFrame would otherwise call SDL_SetCursor/SDL_HideCursor
     // (Java on Android) from the guest fiber that starts the next host frame.
@@ -2516,6 +2590,8 @@ void Draw() noexcept {
     if (g_firstPersonToggleRequested.exchange(false, std::memory_order_acq_rel)) {
         ToggleFirstPersonCamera();
     }
+    UpdateIntroduction();
+    aurora_set_vr_ui_guide(nullptr);
     ApplyConfiguredMappings();
     PersistDisplayModeIfChanged();
     UpdateCursorAutoHide();
@@ -2527,7 +2603,8 @@ void Draw() noexcept {
     DrawExitPrompt();
     controller_mapping_wizard::Draw();
     // The wizard captures raw presses; keep them out of the game.
-    const bool inputBlocked = controller_mapping_wizard::IsActive() || g_rebind.active;
+    const bool inputBlocked = controller_mapping_wizard::IsActive() || g_rebind.active || g_introductionKind!=0 ||
+        mkw::vr::OpenXRSettingsPanelOpen();
     PADBlockInput(inputBlocked);
     InputBindings::SetInputBlocked(inputBlocked);
     DrawStartupScreen();

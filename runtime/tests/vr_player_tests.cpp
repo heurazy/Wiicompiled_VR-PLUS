@@ -187,5 +187,17 @@ int main() {
     TestNoOpponentFallback();
     TestInvalidMapping();
     TestUnavailableGuestData();
+    MakeRace(5);
+    const auto local=Resolve();
+    const uint32_t status=0x81400000;
+    GuestMemory::Write32(local.accessor+4,status);
+    GuestMemory::Write32(status+0xC,0);
+    Check(!mkw::vr::detail::LocalPlayerInBullet<GuestMemory>(local),"normal kart keeps selected camera");
+    GuestMemory::Write32(status+0xC,0x08000000);
+    Check(mkw::vr::detail::LocalPlayerInBullet<GuestMemory>(local),"local Bullet Bill uses vanilla camera");
+    GuestMemory::Write32(status+0xC,0);
+    Check(!mkw::vr::detail::LocalPlayerInBullet<GuestMemory>(local),"Bullet Bill exit restores camera");
+    GuestMemory::Write32(local.accessor+4,0);
+    Check(!mkw::vr::detail::LocalPlayerInBullet<GuestMemory>(local),"absent status cannot force camera");
     return g_failures == 0 ? 0 : 1;
 }

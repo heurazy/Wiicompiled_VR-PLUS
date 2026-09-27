@@ -307,6 +307,9 @@ struct ModelVisibilityState {
 };
 
 struct FirstPersonState {
+    CameraMode mode = CameraMode::Game;
+    bool opening_pending = true;
+    bool bullet_active = false;
     bool enabled = false;
     FirstPersonHeadOffsets offsets{};
     float units_per_meter = RuntimeConfigFile::kVrFirstPersonUnitsPerMeterDefault;
@@ -1242,7 +1245,7 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
                                                                : FirstPersonRotation::YawOnly;
     // Flat Screen mode shows the race on the menu screen through the game's own
     // camera, where a hidden driver would only be missing from the kart.
-    MkwVRFirstPersonConfigure(RuntimeConfigFile::VrFirstPerson(false) &&
+    MkwVRFirstPersonConfigure(RuntimeConfigFile::VrCameraMode() != 0 &&
                                   !RuntimeConfigFile::VrFlatScreen(),
                               offsets, units_per_meter, rotation);
     MkwVRPolicySetFirstPersonUnitsPerMeter(units_per_meter);
@@ -1251,7 +1254,8 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
     {
         // Same lock the guest thread applies these under.
         std::lock_guard lock(g_mutex);
-        g_visibility.hide_driver = RuntimeConfigFile::VrFirstPersonHideDriver();
+        g_state.mode = static_cast<CameraMode>(RuntimeConfigFile::VrCameraMode());
+        g_visibility.hide_driver = g_state.mode == CameraMode::FirstPerson && RuntimeConfigFile::VrFirstPersonHideDriver();
         g_visibility.hidden_model = RuntimeConfigFile::VrFirstPersonHiddenModel();
         const FirstPersonSeat seat = cockpit ? FirstPersonSeat::Cockpit : FirstPersonSeat::Custom;
         if (seat != g_state.seat) {
@@ -1286,6 +1290,7 @@ void MkwVRFirstPersonReset() noexcept {
     g_visibility.logged = false;
     g_visibility.logged_models = false;
     g_visibility.logged_range = false;
+    g_state.opening_pending = true;
     g_state.armed = false;
     g_state.armed_view_valid = false;
     g_state.camera_address = 0;
@@ -1324,7 +1329,24 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
                   race_view[8 + axis] * race_view[11]);
         }
     }
-    if (!g_state.enabled) {
+    if (g_state.opening_pending) {
+        uint32_t info=0, stage=0;
+        if (ReadGuestPointer(0x809BD730u, info) && Memory::TryRead32(info+0x28, stage) &&
+            race_camera_address && stage>=1 && stage<=4) {
+            g_state.opening_pending = false;
+            g_state.mode = static_cast<CameraMode>(RuntimeConfigFile::Get().vrDefaultCamera);
+            g_state.enabled = g_state.mode != CameraMode::Game && !RuntimeConfigFile::VrFlatScreen();
+            g_visibility.hide_driver = g_state.mode==CameraMode::FirstPerson && RuntimeConfigFile::VrFirstPersonHideDriver();
+        }
+    }
+    const auto player = detail::ReadLocalPlayerKart<Memory>();
+    const bool bullet = detail::LocalPlayerInBullet<Memory>(player);
+    if (bullet != g_state.bullet_active) {
+        RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] Bullet Bill vanilla camera: " << bullet << std::endl;
+        g_state.safe_tilt.Reset();
+    }
+    g_state.bullet_active = bullet;
+    if (!g_state.enabled || g_state.opening_pending || bullet) {
         g_state.anchor = {};
         g_state.hold_frames = 0;
         g_state.armed = false;
@@ -1333,7 +1355,6 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
         RestoreModelVisibilityLocked();
         return;
     }
-    const auto player = detail::ReadLocalPlayerKart<Memory>();
     if (player.failed_step != nullptr || player.accessor != g_state.player_kart.accessor) {
         // Do not carry a held anchor or hidden models across an ownership
         // change, including entering spectator mode or an online roster reset.
@@ -1345,7 +1366,7 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
     g_state.armed = true;
     g_state.armed_frame = guest_frame_index;
     g_state.armed_view_valid = ReadSceneViewMatrix(g_state.armed_view);
-    if (g_state.seat == FirstPersonSeat::Cockpit) {
+    if (g_state.mode == CameraMode::FirstPerson && g_state.seat == FirstPersonSeat::Cockpit) {
         LatchCockpitLocked(guest_frame_index);
     } else {
         g_state.cockpit = {};
@@ -1390,6 +1411,10 @@ void MkwVRFirstPersonCommit() noexcept {
     } else if (kart = ReadPlayerKartPose(g_state.player_kart, kart_from_local);
                kart.failed_step != nullptr) {
         failed_step = kart.failed_step;
+    } else if (g_state.mode == CameraMode::Far) {
+        if (!ComputeKartDioramaAnchor(view_from_world, kart_from_local,
+                RuntimeConfigFile::VrDioramaDistance(), RuntimeConfigFile::VrDioramaHeight(), anchor))
+            failed_step = "diorama anchor";
     } else if (g_state.seat == FirstPersonSeat::Cockpit) {
         ComputeCockpitAnchorLocked(view_from_world, kart, kart_from_local, cockpit_anchor, failed_step);
     } else if (!ComputeFirstPersonAnchor(view_from_world, kart_from_local,
@@ -1401,13 +1426,15 @@ void MkwVRFirstPersonCommit() noexcept {
     }
 
     if (failed_step == nullptr) {
-        if (g_state.seat == FirstPersonSeat::Cockpit) {
+        if (g_state.mode == CameraMode::FirstPerson && g_state.seat == FirstPersonSeat::Cockpit) {
             g_state.anchor = cockpit_anchor;
             g_state.anchor.guest_frame_index = guest_frame_index;
             anchor = cockpit_anchor.anchor_from_scene;
             LogCockpitLocked(guest_frame_index, view_from_world);
         } else {
             g_state.anchor = {anchor, true, guest_frame_index};
+            g_state.anchor.units_per_meter = g_state.mode == CameraMode::Far
+                ? RuntimeConfigFile::VrDioramaUnitsPerMeter() : g_state.units_per_meter;
         }
         g_state.hold_frames = kHoldFrames;
         g_state.ever_valid_this_race = true;
@@ -1435,6 +1462,23 @@ void MkwVRFirstPersonCommit() noexcept {
             << std::endl;
     }
     g_state.anchor = {};
+}
+
+CameraMode MkwVRGetCameraMode() noexcept {
+    std::lock_guard lock(g_mutex);
+    return (g_state.opening_pending || g_state.bullet_active) ? CameraMode::Game : g_state.mode;
+}
+bool MkwVRRaceIntroActive() noexcept {
+    std::lock_guard lock(g_mutex);
+    return g_state.opening_pending;
+}
+void MkwVRSetCameraMode(CameraMode mode) noexcept {
+    if (!RuntimeConfigFile::SetVrCameraMode(static_cast<int>(mode))) return;
+    MkwVRFirstPersonApplyConfiguredSettings();
+    std::lock_guard lock(g_mutex);
+    g_state.anchor = {};
+    g_state.hold_frames = 0;
+    g_state.safe_tilt.Reset();
 }
 
 FirstPersonAnchor MkwVRFirstPersonGetAnchor() noexcept {

@@ -45,3 +45,7 @@ See [feature coverage and limitations](../docs/WHEELWIZARD-VR.md). Run
 `WheelWizard.exe --vr-diagnostics` for a read-only JSON report of the resolved paths.
 Integration regression tests are included in the patch under
 `WheelWizard.Test/Features/Recomp/LocalVrPathsTests.cs`.
+
+The patch also handles valid license renaming without a NAND Mii, preserving save
+identity and refusing empty slots. `Launcher/Build-WheelWizard.ps1` reproduces
+the bundled launcher; the installer and portable package both include it.
