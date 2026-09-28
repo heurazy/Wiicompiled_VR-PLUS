@@ -54,10 +54,13 @@ This keeps the roadmap from the [original port](https://github.com/heurazy/mario
 - Additional controller options, onboarding and resettable tutorials.
 - Multiplayer local player camera and save/launcher fixes. Online play depends on Retro WFC and its availability.
 - Periodic controller discovery freezes: inherited Wii Remote background scanning is off after upgrade unless enabled; USB wheel discovery reacts to hotplug.
+- Quest 3 standalone APK with local PAL game import, textured Touch Plus controllers, and frame interpolation disabled for stable presentation. Base game menus and Retro Rewind races have been tested on device.
+- Windows 1.2 setup detects insufficient free disk space during local compilation, fetches the latest available Retro Rewind pack, and keeps Wheel Wizard connected to this fork's VR updates.
+- Startup menu placement, the X + Y VR options shortcut, and VR panel presentation have been corrected in the integrated Windows build.
 
 ### Still to validate or build
 
-- Test the Quest standalone build and its graphics settings across more Quest models and firmware versions. The latest Quest frame interpolation change needs headset confirmation; interpolation stays off on Quest meanwhile.
+- Test the Quest standalone build and its graphics settings across more Quest models and firmware versions; frame interpolation remains off on Quest.
 - Expand the tested compatibility list for USB steering wheels, pedal sets, paddle mappings and vibration drivers.
 - Keep improving item aiming and throwing options, especially for manually steered first person.
 - Confirm view based object culling, multiplayer cameras and the controller tutorials across more tracks, game modes and OpenXR runtimes.

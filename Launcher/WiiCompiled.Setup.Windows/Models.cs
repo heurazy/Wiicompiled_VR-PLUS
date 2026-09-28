@@ -30,7 +30,9 @@ internal sealed class InstallOptions
     /// </summary>
     public bool Portable { get; init; }
 
-    public bool HasRetroRewind => RetroDirectoryPath is not null;
+    public bool DownloadRetroRewind { get; init; }
+
+    public bool HasRetroRewind => RetroDirectoryPath is not null || DownloadRetroRewind;
 }
 
 internal sealed class PayloadManifest

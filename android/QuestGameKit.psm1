@@ -116,9 +116,12 @@ function Get-StringSha256Hex([string]$Text) {
 # Identity of a runtime/include tree. Translated code compiles against these headers, so a game is
 # only built from a translation whose runtime headers are the kit's own.
 function Get-RuntimeIncludeFingerprint([string]$Directory) {
-    $lines = Get-RelativeFiles $Directory | Sort-Object FullName | ForEach-Object {
-        $_.Relative + ' ' + (Get-Sha256Hex $_.FullName)
-    }
+    # Sort by relative path with a fixed comparer. PowerShell 5.1 and 7 use
+    # different collation for Sort-Object, which made a kit exported by Gradle
+    # disagree with the same headers when Build-QuestGame ran under pwsh 7.
+    $sorted = [Collections.Generic.SortedDictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    Get-RelativeFiles $Directory | ForEach-Object { $sorted[$_.Relative] = Get-Sha256Hex $_.FullName }
+    $lines = foreach ($entry in $sorted.GetEnumerator()) { $entry.Key + ' ' + $entry.Value }
     return Get-StringSha256Hex ($lines -join "`n")
 }
 
@@ -453,9 +456,11 @@ function Invoke-QuestGameBuild {
     # kit's runtime headers and linked with the kit's runtime objects.
     $workspaceInclude = Join-Path $workspace 'runtime/include'
     if (Test-Path $workspaceInclude) {
-        if ((Get-RuntimeIncludeFingerprint $workspaceInclude) -ne $recipe.runtimeIncludeFingerprint) {
+        $workspaceHeaders = Get-RuntimeIncludeFingerprint $workspaceInclude
+        if ($workspaceHeaders -ne $recipe.runtimeIncludeFingerprint) {
             throw ('The Quest app and the translation on this PC come from different WiiCompiled releases ' +
-                '(their runtime headers differ). Update both to the same release, then build again.')
+                "(their runtime headers differ: $workspaceHeaders vs $($recipe.runtimeIncludeFingerprint) at $workspaceInclude). " +
+                'Update both to the same release, then build again.')
         }
     }
     New-Item -ItemType Directory -Force $BuildDir | Out-Null

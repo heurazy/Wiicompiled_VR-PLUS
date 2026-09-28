@@ -285,7 +285,7 @@ foreach ($required in @('ToolkitFingerprint','TranslationFingerprint','NativeToo
 $manifest = [ordered]@{
     ProductId = 'wiicompiled-openxr-vr'
     SchemaVersion = 2
-    ProductVersion = '0.4.0'
+    ProductVersion = '1.2.0'
     ExpectedGameId = $pins.GameId
     ExpectedDolSha256 = $pins.DolSha256
     ExpectedRelSha256 = $pins.RelSha256

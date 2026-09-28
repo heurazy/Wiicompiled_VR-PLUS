@@ -10,6 +10,19 @@ internal sealed class InstallerEngine
 
     public async Task InstallAsync(InstallOptions options, CancellationToken cancellationToken = default)
     {
+        var root = Path.GetFullPath(options.InstallDirectory);
+        ValidateInstallDirectory(root);
+        ProductOwnership.Ensure(root, allowEmpty: true);
+        // Recover this installation's interrupted staging before testing free space:
+        // otherwise a full drive could prevent cleanup of the files that filled it.
+        Directory.CreateDirectory(Directory.GetParent(root)!.FullName);
+        using var operationLock = InstallOperationLock.Acquire(root, _reporter);
+        await InstallationDiskGuard.RunAsync(root, cancellationToken,
+            token => InstallCoreAsync(options, token));
+    }
+
+    private async Task InstallCoreAsync(InstallOptions options, CancellationToken cancellationToken)
+    {
         var installDirectory = Path.GetFullPath(options.InstallDirectory);
         ValidateInstallDirectory(installDirectory);
         ProductOwnership.Ensure(installDirectory, allowEmpty: true);
@@ -19,7 +32,6 @@ internal sealed class InstallerEngine
                      ?? throw new InvalidOperationException("The installation directory has no parent.");
         Directory.CreateDirectory(parent);
 
-        using var operationLock = InstallOperationLock.Acquire(installDirectory, _reporter);
         var existing = new Installation(installDirectory);
 
         PortableInstallHealing.HealMovedInstall(existing, _reporter);
@@ -72,17 +84,17 @@ internal sealed class InstallerEngine
 
         _reporter.Progress(InstallStages.ExtractToolkit,
             "Inspecting the release's local recompilation toolkit...", 1);
-        if (extractToolkit) payload.ExtractDirectory(InstalledLayout.ToolkitDirectoryName, toolkit);
+        if (extractToolkit) payload.ExtractDirectory(InstalledLayout.ToolkitDirectoryName, toolkit, cancellationToken);
         if (extractWorkspace)
         {
-            payload.ExtractDirectory(InstalledLayout.WorkspaceDirectoryName, workspace);
+            payload.ExtractDirectory(InstalledLayout.WorkspaceDirectoryName, workspace, cancellationToken);
             WorkspaceTimestamps.MarkChangedFiles(existing.WorkspaceDirectory, workspace,
                 _reporter.Diagnostic, cancellationToken);
         }
         payload.ExtractEntry("host/WiiCompiled-Setup.exe",
             Path.Combine(staging, ProductInfo.SetupCopyName));
-        payload.ExtractDirectory("licenses", Path.Combine(staging, "licenses"));
-        payload.ExtractDirectory("WheelWizard", Path.Combine(staging, "WheelWizard"));
+        payload.ExtractDirectory("licenses", Path.Combine(staging, "licenses"), cancellationToken);
+        payload.ExtractDirectory("WheelWizard", Path.Combine(staging, "WheelWizard"), cancellationToken);
         payload.ExtractEntry(InstalledLayout.PayloadManifestFileName,
             Path.Combine(staging, InstalledLayout.PayloadManifestFileName));
 
@@ -91,15 +103,29 @@ internal sealed class InstallerEngine
         var header = await InputValidation.ReadDiscHeaderAsync(nodTool, options.GamePath,
             cancellationToken);
         InputValidation.EnsureCompatibleDisc(header, manifest);
-        var canonicalRetroRoot = options.RetroDirectoryPath is null
+        string? downloadedRetroRoot = null;
+        var requestedRetroRoot = options.RetroDirectoryPath;
+        if (options.DownloadRetroRewind || requestedRetroRoot is not null)
+        {
+            var installedPack = requestedRetroRoot is not null
+                ? RetroRewindSource.ResolveRetroRewind6(requestedRetroRoot)
+                : Path.Combine(installDirectory, "RetroRewind6");
+            requestedRetroRoot = await RetroRewindDownload.EnsureLatestAsync(staging,
+                Directory.Exists(installedPack) ? installedPack : null, _reporter, cancellationToken);
+            if (!string.Equals(requestedRetroRoot, installedPack, StringComparison.OrdinalIgnoreCase))
+                downloadedRetroRoot = requestedRetroRoot;
+        }
+        var canonicalRetroRoot = requestedRetroRoot is null
             ? null
-            : RetroRewindSource.ResolveRetroRewind6(options.RetroDirectoryPath);
+            : RetroRewindSource.ResolveRetroRewind6(requestedRetroRoot);
         ValidateRetroOptions(canonicalRetroRoot, options.RetroWfcPayloadMode, manifest);
 
         var retroCompileInputs = canonicalRetroRoot is null
             ? null
             : SnapshotRetroRewindCompileInputs(canonicalRetroRoot,
                 Path.Combine(staging, "compile-inputs"), cancellationToken);
+        if (downloadedRetroRoot is not null)
+            canonicalRetroRoot = Path.Combine(installDirectory, "RetroRewind6");
         if (options.Portable)
         {
             var portableRoot = PortableRoot.Create(parent);
@@ -288,6 +314,8 @@ internal sealed class InstallerEngine
         List<InstallTransactionEntry> entries, CancellationToken cancellationToken,
         int progressPercent = 95, int completionPercent = 99, bool createShortcuts = false)
     {
+        if (Directory.Exists(Path.Combine(staging, "RetroRewind6")))
+            AddComponent(entries, staging, installDirectory, "RetroRewind6");
         entries.Add(InstallTransactionEntry.Directory(Path.Combine(staging, "licenses"),
             Path.Combine(installDirectory, "licenses")));
         if (File.Exists(Path.Combine(staging, "WheelWizard", "WheelWizard.exe")))

@@ -172,7 +172,7 @@ index 0000000..8c61312
 +    }
 +}
 diff --git a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
-index f934e22..0be00e6 100644
+index f934e22..4e48341 100644
 --- a/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
 +++ b/WheelWizard/Features/AutoUpdating/AutoUpdaterSingletonService.cs
 @@ -24,6 +24,12 @@ public class AutoUpdaterSingletonService(
@@ -210,7 +210,7 @@ index f934e22..0be00e6 100644
 +        }
 +        if (!WheelWizard.Recomp.RecompVersion.TryParse(current, out var installed))
 +            return;
-+        var releases = await gitHubService.GetReleasesAsync("heurazy", "mario-kart-wii-VR-port", count: 100);
++        var releases = await gitHubService.GetReleasesAsync("heurazy", "Wiicompiled_VR-PLUS", count: 100);
 +        if (releases.IsFailure)
 +            return;
 +        var latest = WheelWizard.Recomp.RecompReleaseResolver.FindLatest(releases.Value);
@@ -261,19 +261,24 @@ index f030f64..badd100 100644
          }
          catch (Exception e)
 diff --git a/WheelWizard/Features/Recomp/RecompInstallService.cs b/WheelWizard/Features/Recomp/RecompInstallService.cs
-index fc9cb89..f70cef6 100644
+index fc9cb89..05ff636 100644
 --- a/WheelWizard/Features/Recomp/RecompInstallService.cs
 +++ b/WheelWizard/Features/Recomp/RecompInstallService.cs
-@@ -193,7 +193,7 @@ public sealed class RecompInstallService : IRecompInstallService
+@@ -193,9 +193,11 @@ public sealed class RecompInstallService : IRecompInstallService
              logger.LogInformation("The WiiCompiled product check could not run because the installation is busy");
  
          var status = RecompStatusResolver.Resolve(
 -            IsGameFileConfigured(),
 +            IsGameFileConfigured() || (Services.Launcher.LocalVrLauncher.IsLocalBundle && IsCurrentInstallState(state)),
              hasInstalledHost ? installedVersion : null,
-             latestRelease?.TagName,
+-            latestRelease?.TagName,
++            // GitHub release availability does not determine Retro-WFC connectivity.
++            // A locally verified VR bundle can play online even before its first release.
++            latestRelease?.TagName ?? (Services.Launcher.LocalVrLauncher.IsLocalBundle ? installedVersion : null),
              products?.IsSuccess == true ? products.Value : null,
-@@ -380,7 +380,7 @@ public sealed class RecompInstallService : IRecompInstallService
+             installationBusy
+         );
+@@ -380,7 +382,7 @@ public sealed class RecompInstallService : IRecompInstallService
      {
          // No platform guard here on purpose: AddRecomp() is the single gate, so this service only ever
          // exists on Windows in the first place.
@@ -282,7 +287,7 @@ index fc9cb89..f70cef6 100644
              return Fail(t("message_warning.not_find_game.extra"));
  
          Report(progress, t("progress.recomp_checking_release"), 0);
-@@ -417,6 +417,20 @@ public sealed class RecompInstallService : IRecompInstallService
+@@ -417,6 +419,20 @@ public sealed class RecompInstallService : IRecompInstallService
          if (setupResult.IsFailure)
              return setupResult.Error;
  
@@ -303,7 +308,7 @@ index fc9cb89..f70cef6 100644
          return await RunSilentInstallAsync(setupResult.Value, payloadMode, progress, cancellationToken);
      }
  
-@@ -512,6 +526,7 @@ public sealed class RecompInstallService : IRecompInstallService
+@@ -512,6 +528,7 @@ public sealed class RecompInstallService : IRecompInstallService
          if (!reconciled)
              return Fail("WiiCompiled must complete its current pre-launch reconciliation before it can launch.");
  
@@ -311,7 +316,7 @@ index fc9cb89..f70cef6 100644
          var launchResult = await processRunner.RunAsync(
              environment.InstalledSetupFilePath,
              RecompSetupCommandBuilder.BuildLaunchArguments(retroRewind: true),
-@@ -521,11 +536,19 @@ public sealed class RecompInstallService : IRecompInstallService
+@@ -521,11 +538,19 @@ public sealed class RecompInstallService : IRecompInstallService
          );
          if (launchResult.IsFailure)
              return launchResult.Error;
@@ -355,7 +360,7 @@ index 130f004..6770daf 100644
  
      public async Task<WheelWizardStatus> GetCurrentStatus()
 diff --git a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
-index cde21dc..2cde3a1 100644
+index cde21dc..62b64e5 100644
 --- a/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
 +++ b/WheelWizard/Features/Recomp/RecompReleaseResolver.cs
 @@ -13,12 +13,12 @@ public static class RecompReleaseResolver
@@ -369,7 +374,7 @@ index cde21dc..2cde3a1 100644
      /// The name of the recomp staging repository.
      /// </summary>
 -    public const string RepositoryName = "Wiicompiled";
-+    public static string RepositoryName => Services.Launcher.LocalVrLauncher.IsLocalBundle ? "mario-kart-wii-VR-port" : "Wiicompiled";
++    public static string RepositoryName => Services.Launcher.LocalVrLauncher.IsLocalBundle ? "Wiicompiled_VR-PLUS" : "Wiicompiled";
  
      /// <summary>
      /// Returns the newest usable release, or <see langword="null"/> when the listing contains none.

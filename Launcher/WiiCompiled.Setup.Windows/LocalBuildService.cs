@@ -111,14 +111,19 @@ internal sealed class LocalBuildService
             else _reporter.Diagnostic(line);
         }
 
+        var exitCode = -1;
+        await InstallationDiskGuard.RunAsync(installStaging, cancellationToken, async token =>
+        {
         var build = await ProcessRunner.RunAsync(
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
                 "WindowsPowerShell", "v1.0", "powershell.exe"),
-            arguments, Observe, cancellationToken, ScrubEnvironment, capture: false,
+            arguments, Observe, token, ScrubEnvironment, capture: false,
             ex => _reporter.Diagnostic(
                 "The cancelled build process could not be terminated immediately: " + ex.Message));
-        if (build.ExitCode != 0)
-            throw new InvalidOperationException($"Local recompilation failed with exit code {build.ExitCode}. See the setup log for the failed translator or compiler command.");
+        exitCode = build.ExitCode;
+        });
+        if (exitCode != 0)
+            throw new InvalidOperationException($"Local recompilation failed with exit code {exitCode}. See the setup log for the failed translator or compiler command.");
 
         var expectedOutputs = profile switch
         {

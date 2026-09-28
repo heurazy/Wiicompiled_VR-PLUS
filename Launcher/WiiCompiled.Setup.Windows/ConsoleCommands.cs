@@ -11,7 +11,7 @@ internal static class ConsoleCommands
         Console.Out.WriteLine("Wheel Wizard is the graphical interface for installing and launching WiiCompiled.");
         Console.Out.WriteLine();
         Console.Out.WriteLine("Commands:");
-        Console.Out.WriteLine("  --silent --game <image> --install-dir <dir> [--retro-dir <folder>] [--portable]");
+        Console.Out.WriteLine("  --silent --game <image> --install-dir <dir> [--download-retro-rewind | --retro-dir <folder>] [--portable]");
         Console.Out.WriteLine("  --verify-inputs --game <image> [--retro-dir <folder>]");
         Console.Out.WriteLine("  --check-products [--install-dir <dir>] [--retro-dir <folder>] [--progress-json]");
         Console.Out.WriteLine("  --repair-products --install-dir <dir> --retro-dir <folder> " +
@@ -130,6 +130,7 @@ internal static class ConsoleCommands
             {
                 GamePath = command.GamePath!,
                 RetroDirectoryPath = command.RetroDirectoryPath,
+                DownloadRetroRewind = command.DownloadRetroRewind,
                 RetroWfcPayloadMode = command.RetroWfcPayloadMode,
                 InstallDirectory = installDirectory,
                 Portable = command.Portable

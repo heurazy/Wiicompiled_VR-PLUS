@@ -31,6 +31,15 @@ internal static class Program
             if (command.Mode == AppMode.Version)
                 return ConsoleCommands.Version();
 
+            if (command.Mode == AppMode.InfoJson)
+                return ConsoleCommands.InfoJson();
+
+            if (command.Mode == AppMode.BuildQuest)
+            {
+                using var cancellationSignal = CancellationSignal.ObserveEnvironment();
+                return ConsoleCommands.BuildQuest(command, cancellationSignal.Token).GetAwaiter().GetResult();
+            }
+
             if (command.Mode == AppMode.Help)
                 return ConsoleCommands.Help();
 
@@ -111,7 +120,7 @@ internal static class ProductInfo
 {
     public const string Id = "wiicompiled-openxr-vr";
     public const string Name = "WiiCompiled OpenXR VR";
-    public const string Version = "0.4.0";
+    public const string Version = "1.2.0";
 
     /// <summary>
     /// The setup executable is copied into the installation under this name. It is the launcher and

@@ -35,6 +35,76 @@ internal static class SelfTests
     public static int Run()
     {
         var failures = new List<string>();
+        Test("Retro Rewind extraction cancellation and path containment", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "VR-pack-safety-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var archive = Path.Combine(root, "pack.zip");
+                using (var zip = System.IO.Compression.ZipFile.Open(archive, System.IO.Compression.ZipArchiveMode.Create))
+                using (var writer = new StreamWriter(zip.CreateEntry("RetroRewind6/version.txt").Open()))
+                    writer.Write("6.12.8");
+                var output = Path.Combine(root, "output");
+                RetroRewindDownload.ExtractPackAsync(archive, output, CancellationToken.None).GetAwaiter().GetResult();
+                if (File.ReadAllText(Path.Combine(output, "RetroRewind6", "version.txt")) != "6.12.8")
+                    throw new Exception("Pack extraction lost content.");
+                using var cancelled = new CancellationTokenSource();
+                cancelled.Cancel();
+                try
+                {
+                    RetroRewindDownload.ExtractPackAsync(archive, Path.Combine(root, "cancelled"), cancelled.Token).GetAwaiter().GetResult();
+                    throw new Exception("Pack extraction ignored cancellation.");
+                }
+                catch (OperationCanceledException) { }
+                File.Delete(archive);
+                using (var zip = System.IO.Compression.ZipFile.Open(archive, System.IO.Compression.ZipArchiveMode.Create))
+                    zip.CreateEntry("../escaped.txt");
+                try
+                {
+                    RetroRewindDownload.ExtractPackAsync(archive, output, CancellationToken.None).GetAwaiter().GetResult();
+                    throw new Exception("Pack extraction allowed escaping its staging root.");
+                }
+                catch (InvalidDataException) { }
+                if (File.Exists(Path.Combine(root, "escaped.txt"))) throw new Exception("Unsafe file was written.");
+            }
+            finally { Directory.Delete(root, recursive: true); }
+        }, failures);
+        Test("Installation disk reserve and runaway growth", () =>
+        {
+            const long gib = 1024L * 1024 * 1024;
+            InstallationDiskGuard.ValidateBudget("test", 20 * gib, 28 * gib);
+            foreach (var limits in new[] { (Free: 7 * gib, Initial: 12 * gib),
+                         (Free: 70 * gib, Initial: 100 * gib) })
+            {
+                try
+                {
+                    InstallationDiskGuard.ValidateBudget("test", limits.Free, limits.Initial);
+                    throw new Exception("Unsafe disk usage was accepted.");
+                }
+                catch (IOException) { }
+            }
+        }, failures);
+        Test("Retro Rewind update manifest ordering", () =>
+        {
+            var updates = RetroRewindDownload.ParseUpdates(
+                "6.12.9 https://example.org/new.zip /new.zip Assets\ninvalid\n6.9.1 http://update.rwfc.net:8000/old.zip /old.zip Assets");
+            if (updates.Count != 2 || updates[0].Version != new Version(6, 9, 1) ||
+                updates[1].Version != new Version(6, 12, 9) || updates[0].Url != "https://update.rwfc.net/old.zip")
+                throw new Exception("Retro Rewind versions or legacy update URLs were parsed incorrectly.");
+        }, failures);
+        Test("Automatic Retro Rewind install CLI", () =>
+        {
+            var command = CommandLine.Parse(["--silent", "--game", "game.rvz", "--download-retro-rewind"]);
+            if (!command.DownloadRetroRewind || command.RetroWfcPayloadMode != RetroWfcPayloadMode.Online)
+                throw new Exception("Automatic installation did not enable the online payload.");
+            try
+            {
+                CommandLine.Parse(["--version", "--download-retro-rewind"]);
+                throw new Exception("Automatic download accepted outside install mode.");
+            }
+            catch (ArgumentException) { }
+        }, failures);
         Test("VR installation ownership", TestVrOwnership, failures);
         Test("ISO extension", () => TestAcceptedExtension(".iso"), failures);
         Test("GCM extension", () => TestAcceptedExtension(".gcm"), failures);

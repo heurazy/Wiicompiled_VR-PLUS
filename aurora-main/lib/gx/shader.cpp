@@ -559,6 +559,12 @@ static AlphaCompareExpr alpha_compare(GXCompare comp, u8 ref) {
 static inline std::string vtx_attr(const ShaderConfig& config, GXAttr attr) {
   const auto type = config.attrs[attr].attrType;
   if (type == GX_NONE) {
+    if (attr == GX_VA_POS) {
+      // Some scene transitions submit a vertex stream with no position attribute.
+      // The resulting primitive has no useful geometry, but shader generation
+      // must not abort the entire game while the next scene is loading.
+      return "vec3f(0.0)"s;
+    }
     if (attr == GX_VA_PNMTXIDX) {
       return "ubuf.current_pnmtx";
     }

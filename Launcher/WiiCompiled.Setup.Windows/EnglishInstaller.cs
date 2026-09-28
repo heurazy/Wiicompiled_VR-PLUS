@@ -16,9 +16,10 @@ internal static class EnglishInstaller
 
     private sealed class InstallerForm : Form
     {
-        private readonly TextBox _romPath = new() { Dock = DockStyle.Fill, ReadOnly = true };
-        private readonly TextBox _retroPath = new() { Dock = DockStyle.Fill, ReadOnly = true };
+        private readonly TextBox _romPath = new() { Dock = DockStyle.Fill };
+        private readonly TextBox _retroPath = new() { Dock = DockStyle.Fill };
         private readonly TextBox _destination = new() { Dock = DockStyle.Fill };
+        private readonly CheckBox _downloadRetro = new() { Text = "Download and install Retro Rewind automatically (recommended)", Checked = true, AutoSize = true };
         private readonly CheckBox _portable = new() { Text = "Create a portable installation", AutoSize = true };
         private readonly Button _install = new() { Text = "Install", AutoSize = true, Padding = new Padding(18, 5, 18, 5) };
         private readonly ProgressBar _progress = new() { Dock = DockStyle.Fill, Minimum = 0, Maximum = 100 };
@@ -55,7 +56,7 @@ internal static class EnglishInstaller
             };
             var explanation = new Label
             {
-                Text = "Choose your own clean PAL RMCP01 disc image. ISO, GCM, GCZ, CISO, WBFS, WIA, and RVZ are supported. You may also select an existing RetroRewind6 folder. Your files stay on this PC.",
+                Text = "Choose your own clean PAL RMCP01 disc image. ISO, GCM, GCZ, CISO, WBFS, WIA, and RVZ are supported. By default, setup downloads and installs Retro Rewind too. You may also select an existing RetroRewind6 folder. Your files stay on this PC.",
                 Dock = DockStyle.Fill,
                 AutoSize = true,
                 MaximumSize = new System.Drawing.Size(680, 0)
@@ -97,8 +98,11 @@ internal static class EnglishInstaller
                 _destination.Text = _portable.Checked ? PortableDestination : StandardDestination;
                 _destinationWasEdited = false;
             };
-            layout.Controls.Add(_portable, 1, 5);
-            layout.SetColumnSpan(_portable, 2);
+            var choices = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown };
+            choices.Controls.Add(_downloadRetro);
+            choices.Controls.Add(_portable);
+            layout.Controls.Add(choices, 1, 5);
+            layout.SetColumnSpan(choices, 2);
             layout.Controls.Add(_progress, 0, 6);
             layout.SetColumnSpan(_progress, 3);
             layout.Controls.Add(_status, 0, 7);
@@ -142,6 +146,9 @@ internal static class EnglishInstaller
             using var dialog = new OpenFileDialog
             {
                 Title = "Choose your clean PAL Mario Kart Wii disc image",
+                // Avoid the modern shell picker and its external broker/preview
+                // extensions. Paths can also be pasted directly into the form.
+                AutoUpgradeEnabled = false,
                 Filter = "Wii disc images|*.iso;*.gcm;*.gcz;*.ciso;*.wbfs;*.wia;*.rvz|All files|*.*",
                 CheckFileExists = true
             };
@@ -153,6 +160,7 @@ internal static class EnglishInstaller
             using var dialog = new FolderBrowserDialog
             {
                 Description = "Choose where WiiCompiled VR will be installed",
+                AutoUpgradeEnabled = false,
                 UseDescriptionForTitle = true,
                 SelectedPath = Directory.Exists(_destination.Text) ? _destination.Text : string.Empty,
                 ShowNewFolderButton = true
@@ -165,6 +173,7 @@ internal static class EnglishInstaller
             using var dialog = new FolderBrowserDialog
             {
                 Description = "Optionally choose an existing RetroRewind6 folder",
+                AutoUpgradeEnabled = false,
                 UseDescriptionForTitle = true,
                 ShowNewFolderButton = false
             };
@@ -219,6 +228,8 @@ internal static class EnglishInstaller
                 start.ArgumentList.Add(installDirectory);
                 start.ArgumentList.Add("--progress-json");
                 if (_portable.Checked) start.ArgumentList.Add("--portable");
+                if (_downloadRetro.Checked && string.IsNullOrWhiteSpace(_retroPath.Text))
+                    start.ArgumentList.Add("--download-retro-rewind");
                 if (!string.IsNullOrWhiteSpace(_retroPath.Text))
                 {
                     start.ArgumentList.Add("--retro-dir");
@@ -285,6 +296,7 @@ internal static class EnglishInstaller
         {
             _install.Enabled = !busy;
             _portable.Enabled = !busy;
+            _downloadRetro.Enabled = !busy;
             UseWaitCursor = busy;
         }
 

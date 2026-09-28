@@ -20,6 +20,14 @@ int main() {
        mkw::vr::StartupReferenceInverted({0,.7071068f,0,.7071068f}) ||
        mkw::vr::StartupReferenceInverted({.3f,0,0,.953939f})) std::abort();
     const std::array<float,3> eye{3,1.7f,8};
+    const auto origin=mkw::vr::StartupMenuOrigin({0,0,0,1},eye);
+    for(int axis=0;axis<3;++axis) near(origin.position[axis],eye[axis]);
+    near(origin.orientation[3],1);
+    // A head pitched down starts at eye height without tilting the world's up.
+    const auto tilted=mkw::vr::StartupMenuOrigin({.34202014f,0,0,.93969262f},eye);
+    near(tilted.orientation[0],0); near(tilted.orientation[3],1);
+    const auto inverted=mkw::vr::StartupMenuOrigin({0,0,2,0},eye);
+    near(inverted.orientation[2],1); near(inverted.position[1],1.7f);
     for(float yaw:{0.f,1.5707963f,3.1415926f,-1.5707963f}) {
         const float pitch=.7f,roll=.6f;
         // yaw * pitch * roll, matching a freely oriented headset.

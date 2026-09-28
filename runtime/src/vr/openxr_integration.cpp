@@ -840,10 +840,12 @@ private:
                 startup_origin_pending_=false;
                 if(runtime_->ResetAppSpace(startup_origin_pose_)) {
                     const auto& q=startup_origin_pose_.orientation;
-                    startup_origin_applied_=StartupReferenceInverted({q.x,q.y,q.z,q.w});
+                    const auto& p=startup_origin_pose_.position;
+                    startup_origin_applied_=q.x!=0 || q.y!=0 || q.z!=0 || q.w!=1 ||
+                        p.x!=0 || p.y!=0 || p.z!=0;
                     ResetTrackingOrigin();
                     RT_LOG(RT_TAG_RUNTIME) << (startup_origin_applied_ ?
-                        "OpenXR: repaired inverted startup reference space" :
+                        "OpenXR: initialized seated startup reference space" :
                         "OpenXR: cleared startup correction after runtime recenter") << std::endl;
                 }
             }
@@ -1554,9 +1556,16 @@ private:
             if(!startup_origin_checked_) {
                 startup_origin_checked_=true;
                 const auto& q=frame.xr_frame.views[0].pose.orientation;
-                if(StartupReferenceInverted({q.x,q.y,q.z,q.w})) {
+                bool initializeSeat=StartupReferenceInverted({q.x,q.y,q.z,q.w});
+#if defined(_WIN32)
+                // PC runtimes may start with the previous standing-space origin.
+                initializeSeat=true;
+#endif
+                if(initializeSeat) {
                     const auto center=CenterPosition(frame.xr_frame);
-                    startup_origin_pose_={q,{center[0],center[1],center[2]}};
+                    const auto origin=StartupMenuOrigin({q.x,q.y,q.z,q.w},center);
+                    startup_origin_pose_={{origin.orientation[0],origin.orientation[1],origin.orientation[2],origin.orientation[3]},
+                        {origin.position[0],origin.position[1],origin.position[2]}};
                     startup_origin_pending_=true;
                     frame.presentation.quad_anchored=false;
                     return;
@@ -1821,8 +1830,8 @@ private:
         bool external=false;
         if (runtime_->ConsumeAppSpaceChangesThrough(frame.predicted_display_time, &external)) {
             if (external && startup_origin_applied_) {
-                // Runtime recenter has already corrected its own axes. Keeping
-                // our startup rotation would apply that correction twice.
+                // Runtime recenter replaced both the room's height and axes.
+                // Remove our entire startup offset before anchoring again.
                 startup_origin_pose_={{0,0,0,1},{0,0,0}};
                 startup_origin_pending_=true;
             }

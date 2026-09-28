@@ -49,6 +49,7 @@ internal sealed class CommandLine
     public bool ProgressJson { get; private set; }
     public string? PayloadRootPath { get; private set; }
     public bool Portable { get; private set; }
+    public bool DownloadRetroRewind { get; private set; }
     public string? QuestApkPath { get; private set; }
     public string? OutputPath { get; private set; }
     public bool IncludeGameFiles { get; private set; }
@@ -79,6 +80,7 @@ internal sealed class CommandLine
                 case "--check-products": result.Mode = AppMode.CheckProducts; break;
                 case "--repair-products": result.Mode = AppMode.RepairProducts; break;
                 case "--portable": result.Portable = true; break;
+                case "--download-retro-rewind": result.DownloadRetroRewind = true; break;
                 case "--emit-payload-identities": result.Mode = AppMode.EmitPayloadIdentities; break;
                 case "--payload-root": result.PayloadRootPath = RequireValue(args, ref i); break;
                 case "--quiet": result.Quiet = true; break;
@@ -167,6 +169,8 @@ internal sealed class CommandLine
             if (present) throw new ArgumentException($"{option} is not valid with {rules.Flag}.");
         }
 
+        Reject(DownloadRetroRewind && Mode != AppMode.SilentInstall, "--download-retro-rewind");
+        Reject(DownloadRetroRewind && RetroDirectoryPath is not null, "--download-retro-rewind with --retro-dir");
         Reject(GamePath is not null && !rules.AcceptsGame, "--game");
         Reject(RetroDirectoryPath is not null && !rules.AcceptsRetroDirectory, "--retro-dir");
         Reject(ProgressJson && !rules.AcceptsProgressJson, "--progress-json");
@@ -210,7 +214,9 @@ internal sealed class CommandLine
             RetroWfcPayloadMode == RetroWfcPayloadMode.NotApplicable)
             throw new ArgumentException(
                 "Retro Rewind requires --download-retro-wfc-payload or --skip-retro-wfc-payload.");
-        if (RetroDirectoryPath is null && RetroWfcPayloadMode != RetroWfcPayloadMode.NotApplicable)
+        if (DownloadRetroRewind && RetroWfcPayloadMode == RetroWfcPayloadMode.NotApplicable)
+            RetroWfcPayloadMode = RetroWfcPayloadMode.Online;
+        if (RetroDirectoryPath is null && !DownloadRetroRewind && RetroWfcPayloadMode != RetroWfcPayloadMode.NotApplicable)
             throw new ArgumentException(
                 "--retro-dir is required when selecting a Retro-WFC payload option.");
     }

@@ -125,7 +125,7 @@ VirtualGamepadRelay& Relay() {
 // Buttons: a, b, x, y, start, up, down, left, right, and for the Wii Remote
 // presentation also home, c and z (x/y/start press 1/2/+ there, and the
 // directions push the Nunchuk stick). `panel` presses the settings panel's
-// button (left Y, or both thumbsticks for a gamepad), opening or closing it,
+// chord (left X + Y), opening or closing it,
 // where `a` then selects. The property is unset in normal use, so this costs
 // one property read every few frames.
 constexpr uint32_t kInjectHoldFrames = 12;
@@ -782,23 +782,22 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
         // The panel button in either controller mode.
         panel_hands[0].primary = true;
         panel_hands[0].secondary = true;
-        panel_hands[0].thumbstick_click = true;
-        panel_hands[1].thumbstick_click = true;
     }
     if (Injected("a")) {
         panel_hands[1].primary = true;
     }
     // The game thread may open or close the panel too; only a change made here
     // is written back.
-    const bool was_open = OpenXRSettingsPanelOpen() || OpenXRIntroductionActive();
-    bool open = was_open;
+    const bool introduction = OpenXRIntroductionActive();
+    const bool was_open = OpenXRSettingsPanelOpen();
+    bool open = was_open || introduction;
     settings_panel::Frame panel =
-        m_panel_controls.Update(panel_hands, open, dt_seconds, OpenXRGetControllerMode());
-    if (OpenXRIntroductionActive()) { panel.open=true; panel.withheld=true; }
+        m_panel_controls.Update(panel_hands, open, dt_seconds, OpenXRGetControllerMode(), introduction);
     // Pointer first: the game thread reads it as soon as it sees the panel open.
     PublishSettingsPanel(input_time, settings_panel, panel);
-    if (OpenXRIntroductionActive()) open = true;
-    if (open != was_open) {
+    // Introduction visibility is temporary and must never latch the settings
+    // flag, including when the game thread finishes it during this input frame.
+    if (!introduction && !OpenXRIntroductionActive() && open != was_open) {
         Log(OpenXRLogLevel::Info, open ? "VR settings opened with controller chord" : "VR settings closed with controller chord");
         OpenXRSetSettingsPanelOpen(open);
     }

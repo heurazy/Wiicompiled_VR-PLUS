@@ -24,4 +24,16 @@ inline UprightMenuPose UprightMenuAhead(std::array<float,4> q,
     return {{0,std::sin(yaw*.5f),0,std::cos(yaw*.5f)},
             {eye[0]-std::sin(yaw)*distance,eye[1],eye[2]-std::cos(yaw)*distance}};
 }
+// Normalize the PC runtime's initial room origin to the tracked seat. Normal
+// head pitch/roll must not become the world's horizon.
+inline UprightMenuPose StartupMenuOrigin(std::array<float,4> q,
+                                        std::array<float,3> eye) noexcept {
+    auto origin=UprightMenuAhead(q,eye,0.f);
+    if(StartupReferenceInverted(q)) {
+        const float norm=std::sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+        for(auto& v:q) v/=norm;
+        origin.orientation=q;
+    }
+    return origin;
+}
 }

@@ -194,13 +194,19 @@ if ($Parallel -gt 0) {
     $translatedJobs = $Parallel
     $globalJobs = $Parallel
 } else {
-    $memoryGiB = [math]::Max(1, [math]::Floor(
-        (Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB))
+    # Available RAM matters: total installed RAM includes memory already used by
+    # VR, the browser and other applications. Oversubscribing clang makes Windows
+    # expand its paging file instead of keeping installation memory bounded.
+    $availableGiB = (Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1MB
+    $safeJobs = [math]::Max(1, [math]::Min(4,
+        [math]::Floor(($availableGiB - 6) / 4)))
     $translatorThreads = [math]::Max(1, [math]::Min([Environment]::ProcessorCount, 16))
-    $translatedJobs = [math]::Max(1, [math]::Min([Environment]::ProcessorCount,
-        [math]::Floor($memoryGiB / 2)))
-    $globalJobs = [math]::Max($translatedJobs, [Environment]::ProcessorCount)
+    $translatedJobs = [math]::Min([Environment]::ProcessorCount, $safeJobs)
+    # Non-translated runtime/aurora files also consume RAM. Do not allow them
+    # to bypass the translated pool with an unrestricted CPU-count job limit.
+    $globalJobs = $translatedJobs
 }
+Write-Host "MKWCBUILD: Limiting compilation to $globalJobs simultaneous job(s) to protect RAM and disk space"
 
 $oldPath = $env:PATH
 $oldDotnet = $env:DOTNET_ROOT

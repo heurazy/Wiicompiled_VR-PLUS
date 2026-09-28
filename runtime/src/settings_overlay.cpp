@@ -1364,7 +1364,7 @@ void DrawVrSettings() {
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip(
             "Opens these settings on a panel in front of you, in menus and races alike.\n"
-            "In the headset, press left X + Y (Index: left A + B), or click both sticks to open or close it.\n"
+            "In the headset, press left X + Y (Index: left A + B) to open or close it.\n"
             "Aim at it and pull a trigger to change a setting; push a thumbstick to scroll.\n"
             "During a race, opening it requests pause; closing it resumes only a pause it started.");
     }
@@ -1664,7 +1664,7 @@ void DrawVrSettings() {
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Cycles Original, First person and Diorama. Clicking both sticks opens VR settings.");
+            "Cycles Original, First person and Diorama. Left X + Y opens VR settings.");
     }
     constexpr std::array<const char*, 2> kSeatLabels{"Cockpit", "Custom"};
     if (ImGui::Combo("Seat", &g_vrFirstPersonSeat, kSeatLabels.data(), static_cast<int>(kSeatLabels.size()))) {
@@ -2366,7 +2366,7 @@ void DrawVrSettingsPanelWindow() {
             mkw::vr::OpenXRSetSettingsPanelOpen(false);
         }
         ImGui::TextDisabled("Aim and pull a trigger to change a setting, push a thumbstick to scroll.");
-    ImGui::TextDisabled("Left X + Y or both stick clicks: toggle. Menu: close. Race pause is requested while open.");
+    ImGui::TextDisabled("Left X + Y: toggle. Menu: close. Race pause is requested while open.");
         ImGui::Separator();
         if (ImGui::BeginTabBar("Settings")) {
             const auto tab = [](const char* label, void (*draw)()) {

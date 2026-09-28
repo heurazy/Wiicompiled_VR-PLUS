@@ -79,8 +79,11 @@ void ChordOpensAndClosesOnceAsAGamepad() {
     frame = controls.Update(one, open, kDt, kGamepad);
     Check(!open && !frame.withheld, "one thumbstick click alone neither opens nor withholds");
 
+    one[1].thumbstick_click = true;
+    frame = controls.Update(one, open, kDt, kGamepad);
+    Check(!open && !frame.withheld, "legacy two-stick chord no longer opens settings");
     frame = controls.Update(Chord(), open, kDt, kGamepad);
-    Check(open && frame.open && frame.withheld, "clicking both thumbsticks opens the panel");
+    Check(open && frame.open && frame.withheld, "X+Y opens the panel");
     frame = controls.Update(Chord(), open, kDt, kGamepad);
     Check(open, "holding the chord does not toggle again");
     frame = controls.Update(Released(), open, .25f, kGamepad);
@@ -94,6 +97,18 @@ void ChordOpensAndClosesOnceAsAGamepad() {
 }
 
 void MenuClosesAndItsPressStaysOutOfTheGame() {
+    {
+        Controls introControls;
+        bool visible=true;
+        introControls.Update(Chord(),visible,kDt,kGamepad,true);
+        Check(visible,"options chord cannot toggle the introduction's temporary visibility");
+        visible=false; // saving the camera returns to the game
+        const auto frame=introControls.Update(Chord(),visible,kDt,kGamepad);
+        Check(!visible && frame.withheld,"held intro buttons cannot reopen settings on completion");
+        introControls.Update(Released(),visible,.25f,kGamepad);
+        introControls.Update(Chord(),visible,kDt,kGamepad);
+        Check(visible,"a new X+Y press opens options after the introduction");
+    }
     Controls controls;
     bool open = false;
     controls.Update(Chord(), open, kDt, kWiiRemote);
@@ -205,12 +220,12 @@ int main() {
         Controls controls;bool open=false;
         auto sticks=Released();sticks[0].thumbstick_click=sticks[1].thumbstick_click=true;
         controls.Update(sticks,open,kDt,kGamepad);
-        Check(open,"both stick clicks provide the upstream options shortcut");
+        Check(!open,"both stick clicks cannot open options");
         for(int i=0;i<30;++i) controls.Update(sticks,open,kDt,kGamepad);
-        Check(open,"held stick shortcut opens once only");
+        Check(!open,"holding both sticks cannot open options");
         controls.Update(Released(),open,.25f,kGamepad);
         controls.Update(sticks,open,kDt,kGamepad);
-        Check(!open,"both stick clicks close options after release");
+        Check(!open,"pressing both sticks again still leaves options closed");
         controls.Update(Released(),open,.25f,kGamepad);
         sticks[0].thumbstick_click=false;
         const auto frame=controls.Update(sticks,open,kDt,kGamepad);

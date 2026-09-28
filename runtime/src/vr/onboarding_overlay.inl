@@ -214,7 +214,7 @@ void DrawControllerGuide(const TutorialInput& input,bool cockpit) {
     guide.footerStart=(ImGui::GetCursorScreenPos().y-viewport->Pos.y)/viewport->Size.y;
     aurora_set_vr_ui_guide(&guide);
     ImGui::TextWrapped("Raise the right controller for motion tricks (Wii Remote mode). Button actions follow F10 > Controllers. %s / %s are the left face buttons.",ControllerKey(0,1),ControllerKey(0,2));
-    ImGui::TextWrapped("X + Y or click both sticks: VR options. SteamVR: tap X for tricks, hold X 0.65 seconds to pause. Other runtimes: Menu pauses.");
+    ImGui::TextWrapped("X + Y: VR options. SteamVR: tap X for tricks, hold X 0.65 seconds to pause. Other runtimes: Menu pauses.");
     if(cockpit) ImGui::TextWrapped("Hold either grip near the wheel. Release both grips to steer with the stick. The wheel keeps its centre beyond full lock.");
     if(!input.ui_hands[0].valid || !input.ui_hands[1].valid) ImGui::TextDisabled("Raise your controllers to see live button highlights.");
 }
@@ -285,6 +285,8 @@ void DrawIntroductionWindow() {
                    RuntimeConfigFile::WriteSetting("vr","welcome_complete","true")) {
                     RuntimeConfigFile::Mutable().vrWelcomeComplete=true;
                     mkw::vr::MkwVRSetCameraMode(static_cast<mkw::vr::CameraMode>(choice));
+                    mkw::vr::OpenXRSetSettingsPanelOpen(false);
+                    mkw::vr::OpenXRSetIntroductionActive(false);
                     g_introductionKind=0;g_onboardingError.clear();
                 } else g_onboardingError="Could not save your choice. Check the configuration folder permissions.";
             }
@@ -297,6 +299,8 @@ void DrawIntroductionWindow() {
                 const unsigned completed=RuntimeConfigFile::Get().vrTutorialCompleted|g_tutorial.bit;
                 if(RuntimeConfigFile::WriteSetting("vr","tutorial_completed",std::to_string(completed))) {
                     RuntimeConfigFile::Mutable().vrTutorialCompleted=completed;
+                    mkw::vr::OpenXRSetSettingsPanelOpen(false);
+                    mkw::vr::OpenXRSetIntroductionActive(false);
                     g_tutorial={};g_introductionKind=0;g_onboardingError.clear();
                     mkw::vr::OpenXRRequestTutorialPause();
                 } else g_onboardingError="Could not save tutorial progress. Check the configuration folder permissions.";

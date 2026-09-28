@@ -41,6 +41,11 @@ static void GX__ClearVtxDesc_8016dc34_gx() {
         changed |= g_hleGxState.vtxDesc[i] != GX_NONE;
         g_hleGxState.vtxDesc[i]=GX_NONE;
     }
+    // Nintendo's GXClearVtxDesc retains a direct position descriptor. Aurora's
+    // GXClearVtxDesc does the same; keep the HLE mirror in sync so the next
+    // draw does not publish GX_VA_POS=GX_NONE and abort shader generation.
+    changed |= g_hleGxState.vtxDesc[GX_VA_POS] != GX_DIRECT;
+    g_hleGxState.vtxDesc[GX_VA_POS] = GX_DIRECT;
     if (changed) g_hleGxState.InvalidateVtxLayoutHash();
     // GXClearVtxDesc resets descriptors only; array base/stride state persists.
     GXClearVtxDesc();
@@ -49,6 +54,7 @@ extern "C" void GX__ClearVtxDesc_8016dc34() {
     for (int i = 0; i < 26; ++i) {
         g_gxGameVertexState.vtxDesc[i] = GX_NONE;
     }
+    g_gxGameVertexState.vtxDesc[GX_VA_POS] = GX_DIRECT;
     GxThread::Post(&GX__ClearVtxDesc_8016dc34_gx);
 }
 PPC_NATIVE_OVERRIDE_VOID(8016dc34, GX__ClearVtxDesc_8016dc34, (), ());

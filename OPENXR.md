@@ -1041,4 +1041,4 @@ when the runtime's reference-space change takes effect. Application-created orig
 replacements only invalidate anchors; they never trigger this clearing themselves.
 This prevents a second inversion after the runtime corrects its own reference axes.
 
-VR options also open and close by clicking both thumbsticks together. On SteamVR, physical face-button states from the native controller model supplement OpenXR action states, including controller-specific button masks. Single-stick camera controls remain unchanged.
+VR options open and close with left X + Y (left A + B on Index). The legacy two-thumbstick shortcut is disabled. On SteamVR, physical face-button states from the native controller model supplement OpenXR action states, including controller-specific button masks. Single-stick camera controls remain unchanged.

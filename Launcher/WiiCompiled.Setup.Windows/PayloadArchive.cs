@@ -80,12 +80,13 @@ internal sealed class PayloadArchive : IDisposable
         NormalizeExtractedTimestamp(destination);
     }
 
-    public void ExtractDirectory(string prefix, string destination)
+    public void ExtractDirectory(string prefix, string destination, CancellationToken cancellationToken = default)
     {
         prefix = NormalizeEntryName(prefix).TrimEnd('/') + "/";
         var destinationRoot = Path.GetFullPath(destination).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         foreach (var entry in _zip.Entries)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var normalizedEntry = NormalizeEntryName(entry.FullName);
             if (!normalizedEntry.StartsWith(prefix, StringComparison.Ordinal) || normalizedEntry.EndsWith('/'))
                 continue;
@@ -94,7 +95,18 @@ internal sealed class PayloadArchive : IDisposable
             if (!outputPath.StartsWith(destinationRoot, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidDataException($"Unsafe payload path: {entry.FullName}");
             Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
-            entry.ExtractToFile(outputPath, overwrite: true);
+            InstallationDiskGuard.Check(outputPath, entry.Length);
+            using (var input = entry.Open())
+            using (var output = File.Create(outputPath))
+            {
+                var buffer = new byte[81920];
+                int count;
+                while ((count = input.Read(buffer, 0, buffer.Length)) != 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    output.Write(buffer, 0, count);
+                }
+            }
             NormalizeExtractedTimestamp(outputPath);
         }
     }

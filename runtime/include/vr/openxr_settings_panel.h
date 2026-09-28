@@ -99,8 +99,7 @@ struct Frame {
 // Neither a single item/trick button nor SteamVR's system button opens it.
 inline bool ToggleHeld(const std::array<HandInputs, 2>& hands, OpenXRControllerMode mode) noexcept {
     (void)mode;
-    return (hands[0].primary && hands[0].secondary) ||
-        (hands[0].thumbstick_click && hands[1].thumbstick_click);
+    return hands[0].primary && hands[0].secondary;
 }
 
 // The controller side of the panel, one Update per XR frame:
@@ -119,14 +118,13 @@ public:
     // may have changed it since the last frame. `dt_seconds` is the time since
     // the previous frame; `mode` is how the game sees the controllers.
     Frame Update(const std::array<HandInputs, 2>& hands, bool& open, float dt_seconds,
-                 OpenXRControllerMode mode) noexcept {
+                 OpenXRControllerMode mode, bool introduction = false) noexcept {
         // Some SteamVR bindings deliver the two face-button edges in separate
         // samples. Recognize a near-simultaneous pair, not only an exact frame
         // containing both booleans. A single button still belongs to the game.
         const float elapsed=std::clamp(dt_seconds,0.0f,0.25f);
         if(m_toggle_held) {
-            const bool released=!hands[0].primary && !hands[0].secondary &&
-                !hands[0].thumbstick_click && !hands[1].thumbstick_click;
+            const bool released=!hands[0].primary && !hands[0].secondary;
             m_toggle_release_seconds=released ? m_toggle_release_seconds+elapsed : 0.f;
             // Native SteamVR and OpenXR can briefly disagree about held buttons.
             // Rearm only after a stable release, not a single empty sample.
@@ -139,12 +137,12 @@ public:
         m_primary_recent=hands[0].primary ? 0.12f : std::max(0.f,m_primary_recent-elapsed);
         m_secondary_recent=hands[0].secondary ? 0.12f : std::max(0.f,m_secondary_recent-elapsed);
         const bool toggle = ToggleHeld(hands, mode) || (m_primary_recent>0 && m_secondary_recent>0);
-        if (toggle && !m_toggle_held) {
+        if (toggle && !m_toggle_held && !introduction) {
             open = !open;
         }
         if(toggle) m_toggle_held=true;
 
-        if (open && hands[0].menu && !m_menu_held && m_was_open) {
+        if (open && hands[0].menu && !m_menu_held && m_was_open && !introduction) {
             open = false;
         }
         m_menu_held = hands[0].menu;
