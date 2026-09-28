@@ -36,22 +36,22 @@ See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md) for exact bind
 upgrade behavior and the remaining hardware validation.
 
 ## Roadmap
-- automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
-- sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
-- fix low FPS in menu : planned
 - new hand models : planned
 - fix character height : planned
-- fix black hand in front of HUD : planned
-- VR course object culling based on the player's view rather than the kart's direction: implemented in source; 
 - better motorcycle controls : planned
 - more vehicles visual steering wheel compatibility : planned
-- fix Bullet Bill gate vision : planned
-- option to move with the kart : planned
 - more control options : planned
 - throwing shells and other items option : planned
 <details>
   <summary><h2>DONE</h2></summary>
 
+  - automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
+  - sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
+  - fix low FPS in menu: menus can render above 60 FPS without accelerating the game
+  - fix black hand in front of HUD: corrected hand/HUD depth
+  - VR course object culling based on the player's view rather than the kart's direction: implemented in source; track validation continues
+  - fix Bullet Bill gate vision: temporarily use the original game camera during Bullet Bill
+  - option to move with the kart: configurable movement modes, including the smoothed Safe mode
   - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
   - periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
 
