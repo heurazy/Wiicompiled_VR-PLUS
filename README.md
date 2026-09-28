@@ -14,7 +14,7 @@ This repository contains source code, build tools and integration patches. It do
 
 Compared with the original Mario Kart Wii VR port, this fork brings together the earlier port's user facing improvements, imports additional OpenXR features from iChris4's branch, and adds the Quest standalone target.
 
-- **Quest standalone:** an Android ARM64 app runs Mario Kart Wii and Retro Rewind on Quest without a PC, SteamVR or wireless PC streaming during play. It uses Vulkan and OpenXR. The Quest 3 is the tested standalone headset; see [the Quest preview guide](docs/quest3-preview.md) for setup and current limits.
+
 - **Quest Touch Plus controllers:** textured controller models, animated buttons and thumbsticks, pointer interaction in menus and controller specific tutorial diagrams.
 - **Comfortable driving cameras:** original, first person and diorama views. First person hides the driver and adjusts for different character heights. A right stick click changes view. Optional kart movement modes include a smoothed Safe mode that follows sustained slopes and banks.
 - **Physical driving controls:** tracked hands can grip and turn the kart wheel or motorcycle handlebars. Steering supports one or two hands, passing through the centre, continuous full turns and brief tracking loss. Native vehicle steering animation can be switched off. USB wheels, pedals and paddle buttons can be calibrated; feedback is optional and light.
@@ -22,8 +22,7 @@ Compared with the original Mario Kart Wii VR port, this fork brings together the
 - **VR HUD and visibility fixes:** the circuit map and item panel appear on the left hand, while first person anchors its HUD ahead of the seat. Hand depth, track object culling, race menu rendering, display orientation and the Bullet Bill camera have dedicated VR handling.
 - **Performance controls:** per eye resolution, sharpening, refresh preference, adaptive resolution, diagnostics and menu shader quality. Frame interpolation is disabled on Quest because it makes the standalone presentation unstable; the game's simulation speed remains unchanged.
 - **Controller compatibility:** OpenXR action bindings and profiles for Quest, Valve Index, Vive, Windows Mixed Reality and PICO. Stick calibration, headset button shortcuts and the original port's exact controls are documented below.
-- **Wheel Wizard integration:** the bundled launcher does more than start the game. It connects the VR installation to Retro Rewind updates, mod and patch preparation, compiled product validation and repair, and Retro WFC payload management. Saves, Miis and license names use the VR installation's paths; license renaming works even without a NAND Mii. See [the Wheel Wizard integration guide](integrations/README.md) and [feature coverage and limitations](docs/WHEELWIZARD-VR.md).
-- **Stability and packaging:** upgraded installs ignore inherited Wii Remote rescanning unless the user opts in, USB wheel discovery follows device hotplug, and setup plus portable builds preserve the local games and saves. See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md).
+
 
 The project retains upstream WiiCompiled/OpenXR features as well. The sections below explain the Windows setup, controls, VR settings and build process; the Quest setup is documented separately.
 
