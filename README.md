@@ -36,29 +36,24 @@ See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md) for exact bind
 upgrade behavior and the remaining hardware validation.
 
 ## Roadmap
-
-This is the [original port's roadmap](https://github.com/heurazy/mario-kart-wii-VR-port/blob/08c8f10/README.md#roadmap), kept in its original order with statuses updated for v1.2. Implemented features still need testing across more headsets, tracks and controllers.
-
-- **Automatic correction of upside-down race output:** included in v1.1; feedback from affected headsets is still welcome.
-- **Sim racing steering wheels and pedals:** included in v1.1; compatibility testing across more hardware continues.
-- **Fix low FPS in menus:** implemented; menus can render above 60 FPS without accelerating the game.
-- **New hand models:** still planned. Quest Touch Plus *controller* models were added in v1.2, but they are not a replacement for new hand models.
-- **Fix character height:** implemented for first-person driving, including temporary resize effects.
-- **Fix black hands in front of the HUD:** implemented with corrected HUD depth.
-- **VR course object culling based on the player's view rather than the kart's direction:** implemented; track-by-track validation continues.
-- **Better motorcycle controls:** implemented with revised handlebar interaction; more motorcycle models need testing.
-- **More vehicles with visual steering-wheel compatibility:** coverage improved; broader vehicle validation continues.
-- **Fix Bullet Bill vision:** implemented by temporarily returning to the original camera during Bullet Bill.
-- **Option to move with the kart:** implemented with configurable movement levels and a smoothed Safe mode.
-- **More control options:** implemented in VR settings; controller profiles and calibration continue to be refined.
-- **Throwing shells and other items option:** still planned, particularly for manually steered first person.
-- **Quest standalone:** Quest 3 preview added in v1.2; support across more Quest models and firmware remains to be validated.
-
+- automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
+- sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
+- fix low FPS in menu : planned
+- new hand models : planned
+- fix character height : planned
+- fix black hand in front of HUD : planned
+- VR course object culling based on the player's view rather than the kart's direction: implemented in source; 
+- better motorcycle controls : planned
+- more vehicles visual steering wheel compatibility : planned
+- fix Bullet Bill gate vision : planned
+- option to move with the kart : planned
+- more control options : planned
+- throwing shells and other items option : planned
 <details>
-  <summary><h3>DONE</h3></summary>
+  <summary><h2>DONE</h2></summary>
 
-  - Multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing still depends on Retro WFC availability.
-  - Periodic controller-search freezes: inherited Wii Remote scanning is off after upgrade unless enabled; USB wheel discovery follows hotplug events.
+  - multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing depends on Retro WFC availability
+  - periodic controller-search freezes: legacy Wii Remote scanning is disabled on upgrade in v1.1.1; USB wheel discovery now follows hotplug events
 
 </details>
 
