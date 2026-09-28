@@ -37,33 +37,30 @@ upgrade behavior and the remaining hardware validation.
 
 ## Roadmap
 
-This keeps the roadmap from the [original port](https://github.com/heurazy/mario-kart-wii-VR-port), with status updated for this fork. “Implemented” means the change is in this branch; it does not imply every headset, game mode or wheel model has been tested.
+This is the [original port's roadmap](https://github.com/heurazy/mario-kart-wii-VR-port/blob/08c8f10/README.md#roadmap), kept in its original order with statuses updated for v1.2. Implemented features still need testing across more headsets, tracks and controllers.
 
-### Implemented in this fork
+- **Automatic correction of upside-down race output:** included in v1.1; feedback from affected headsets is still welcome.
+- **Sim racing steering wheels and pedals:** included in v1.1; compatibility testing across more hardware continues.
+- **Fix low FPS in menus:** implemented; menus can render above 60 FPS without accelerating the game.
+- **New hand models:** still planned. Quest Touch Plus *controller* models were added in v1.2, but they are not a replacement for new hand models.
+- **Fix character height:** implemented for first-person driving, including temporary resize effects.
+- **Fix black hands in front of the HUD:** implemented with corrected HUD depth.
+- **VR course object culling based on the player's view rather than the kart's direction:** implemented; track-by-track validation continues.
+- **Better motorcycle controls:** implemented with revised handlebar interaction; more motorcycle models need testing.
+- **More vehicles with visual steering-wheel compatibility:** coverage improved; broader vehicle validation continues.
+- **Fix Bullet Bill vision:** implemented by temporarily returning to the original camera during Bullet Bill.
+- **Option to move with the kart:** implemented with configurable movement levels and a smoothed Safe mode.
+- **More control options:** implemented in VR settings; controller profiles and calibration continue to be refined.
+- **Throwing shells and other items option:** still planned, particularly for manually steered first person.
+- **Quest standalone:** Quest 3 preview added in v1.2; support across more Quest models and firmware remains to be validated.
 
-- Correct upside down race output for affected display paths.
-- USB sim racing wheel and pedal input, calibration and optional light rumble.
-- Higher menu rendering rates without speeding up the game.
-- Textured, animated Quest Touch Plus models and controller visual fixes.
-- Character height adjustment for first person, including temporary resize effects.
-- Correct hand depth in front of the HUD.
-- Course object culling based on the player's view direction.
-- Improved motorcycle handlebar controls and steering animation coverage.
-- Bullet Bill temporarily uses the game's original camera, then restores the selected VR view.
-- Optional first person motion linked to the kart, with configurable movement and comfort modes.
-- Additional controller options, onboarding and resettable tutorials.
-- Multiplayer local player camera and save/launcher fixes. Online play depends on Retro WFC and its availability.
-- Periodic controller discovery freezes: inherited Wii Remote background scanning is off after upgrade unless enabled; USB wheel discovery reacts to hotplug.
-- Quest 3 standalone APK with local PAL game import, textured Touch Plus controllers, and frame interpolation disabled for stable presentation. Base game menus and Retro Rewind races have been tested on device.
-- Windows 1.2 setup detects insufficient free disk space during local compilation, fetches the latest available Retro Rewind pack, and keeps Wheel Wizard connected to this fork's VR updates.
-- Startup menu placement, the X + Y VR options shortcut, and VR panel presentation have been corrected in the integrated Windows build.
+<details>
+  <summary><h3>DONE</h3></summary>
 
-### Still to validate or build
+  - Multiplayer: local-player cockpit and launcher/save fixes included in v1.1; online testing still depends on Retro WFC availability.
+  - Periodic controller-search freezes: inherited Wii Remote scanning is off after upgrade unless enabled; USB wheel discovery follows hotplug events.
 
-- Test the Quest standalone build and its graphics settings across more Quest models and firmware versions; frame interpolation remains off on Quest.
-- Expand the tested compatibility list for USB steering wheels, pedal sets, paddle mappings and vibration drivers.
-- Keep improving item aiming and throwing options, especially for manually steered first person.
-- Confirm view based object culling, multiplayer cameras and the controller tutorials across more tracks, game modes and OpenXR runtimes.
+</details>
 
 ## VR feature details
 
