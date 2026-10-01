@@ -276,10 +276,13 @@ and validation notes.
 - **[WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles)** for the
   textured Touch Plus controller meshes and button animation transforms used by the Quest
   standalone version. See [asset provenance and MIT license](runtime/assets/quest_touch_plus/SOURCE.md).
-- **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **iChris4**: 
+- **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **[iChris4](https://github.com/iChris4)**: 
   This project originated as a fork of iChris4's pioneering OpenXR VR port of WiiCompiled. 
   The core OpenXR integration, stereo rendering pipeline, and initial VR translation hooks 
   were built by iChris4.
+  iChris4 also contributed the native steering-wheel detection fixes integrated in v1.3:
+  [wheel topology handling](https://github.com/iChris4/Wiicompiled_VR/commit/3d48514182f3c055b9614d752edf0896ba190f16)
+  and [node matrix retrieval and topology validation](https://github.com/iChris4/Wiicompiled_VR/commit/f013f9d2f7682802bff576c9c047af49b1fb5ea6).
 - **[WheelWizard](https://github.com/TeamWheelWizard/WheelWizard)** by Team WheelWizard, integrated
   as the local launcher and Retro Rewind front end.
 - **[BigWalkVRInstaller](https://github.com/CircuitLord/BigWalkVRInstaller)** by CircuitLord, whose
