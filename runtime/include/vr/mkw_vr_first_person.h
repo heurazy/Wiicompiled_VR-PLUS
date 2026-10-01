@@ -210,12 +210,17 @@ inline bool InvertMtx(const Mtx34& m, Mtx34& out) noexcept {
 // a leaned-forward riding animation puts the character's eyes over it. Units
 // are the vehicle's; `radius` is the control's half width.
 inline float EyeBehindControls(float eyeForward, float controlsForward, float units, float radius) noexcept {
-    const float clearance = std::clamp(0.40f + radius / units * 0.3f, 0.45f, 0.65f) * units;
-    return std::min(eyeForward, controlsForward - clearance);
+    const float clearance = std::clamp(0.30f + radius / units * 0.25f, 0.35f, 0.42f) * units;
+    // Long or floating characters can start far behind their controls. Bound
+    // both ends of reach rather than only preventing the eye crossing the rim.
+    return std::clamp(eyeForward, controlsForward - 0.45f * units, controlsForward - clearance);
 }
 
-// Tall characters sit higher; normalise them to a comfortable perceived cockpit
-// height by growing the world scale with the measured eye height.
+// Fit the seat height to the native controls, keeping them within arm reach.
+inline float EyeAboveControls(float eyeHeight, float controlsHeight, float units) noexcept {
+    return std::clamp(eyeHeight, controlsHeight + 0.25f * units, controlsHeight + 0.45f * units);
+}
+
 inline float CharacterCockpitScale(float eyeHeight) noexcept {
     if (!detail::IsFiniteFloat(&eyeHeight)) {
         return 1.0f;
@@ -621,6 +626,7 @@ private:
 
 // Enables anchor computation and sets the head offsets and world scale used to
 // convert them. Called whenever the configuration or the F10 toggle changes.
+bool MkwVRCharacterHandActive(size_t hand) noexcept;
 CameraMode MkwVRGetCameraMode() noexcept;
 void MkwVRSetCameraMode(CameraMode mode) noexcept;
 bool MkwVRRaceIntroActive() noexcept;

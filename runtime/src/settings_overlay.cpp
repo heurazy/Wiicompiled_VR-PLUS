@@ -12,6 +12,8 @@
 #include "runtime_config.h"
 #include "runtime_log.h"
 #include "vr/camera_toggle.h"
+#include "vr/body_ik.h"
+#include "vr/openxr_driving.h"
 #include "vr/mkw_vr_first_person.h"
 #include "vr/mkw_vr_policy.h"
 #include "vr/openxr_diagnostics.h"
@@ -1766,6 +1768,22 @@ void DrawVrSettings() {
         ImGui::TextDisabled("Vehicle motion applies to the cockpit seat.");
     else
         ImGui::TextWrapped("Safe eases into sustained slopes and ignores small bumps. Full follows impacts and tricks.");
+    bool bodyIk = RuntimeConfigFile::VrBodyIk();
+    if (ImGui::Checkbox("Character body IK", &bodyIk)) {
+        RuntimeConfigFile::SetVrBodyIk(bodyIk);
+        mkw::vr::MkwVRFirstPersonApplyConfiguredSettings();
+    }
+    ImGui::TextWrapped("Cockpit: your character's body and hands follow the controllers. The head is hidden. Legs keep the game's animations. Unsupported models use VR gloves.");
+    ImGui::BeginDisabled(!bodyIk);
+    bool handsOnly = RuntimeConfigFile::VrBodyIkHandsOnly();
+    if (ImGui::Checkbox("Character hands only", &handsOnly)) {
+        RuntimeConfigFile::SetVrBodyIkHandsOnly(handsOnly);
+        mkw::vr::MkwVRFirstPersonApplyConfiguredSettings();
+    }
+    ImGui::TextWrapped("Hide the character's body and arms, keeping its textured hands tracked by your controllers.");
+    ImGui::TextDisabled("Character hand placement uses the built-in calibrated profiles.");
+    ImGui::EndDisabled();
+    ImGui::BeginDisabled(bodyIk && g_vrFirstPersonSeat == 0);
     int visibility=!g_vrFirstPersonHideDriver?0:g_vrFirstPersonHiddenModel<0?2:1;
     constexpr const char* visibilityLabels[]{"Show driver and vehicle","Hide driver","Hide driver and vehicle"};
     if(ImGui::Combo("Cockpit visibility",&visibility,visibilityLabels,3)) {
@@ -1777,9 +1795,12 @@ void DrawVrSettings() {
     }
     if(ImGui::IsItemHovered())
         ImGui::SetTooltip("Controls your own models in first person. Other racers are unaffected.");
+    ImGui::EndDisabled();
     DrawVrSteeringWheelSettings();
     ImGui::Separator();
     if (ImGui::Button("Reset first-person defaults")) {
+        RuntimeConfigFile::SetVrBodyIk(true);
+        RuntimeConfigFile::SetVrBodyIkHandsOnly(false);
         RuntimeConfigFile::SetVrFirstPersonFollowVehicleMotion(RuntimeConfigFile::kVrFirstPersonFollowVehicleMotionDefault);
         RuntimeConfigFile::SetVrFirstPersonMotionLevel(static_cast<int>(mkw::vr::FirstPersonMotionLevel::Safe));
         g_vrFirstPersonSeat = 0;
@@ -2422,9 +2443,10 @@ void DrawVrSettingsPanel() {
     } else {
         io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
     }
-    if (pointer.select != panel.selectHeld) {
-        io.AddMouseButtonEvent(ImGuiMouseButton_Left, pointer.select);
-        panel.selectHeld = pointer.select;
+    const bool select=pointer.select;
+    if (select != panel.selectHeld) {
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, select);
+        panel.selectHeld = select;
     }
     if (pointer.wheel != 0.0f) {
         io.AddMouseWheelEvent(0.0f, pointer.wheel);

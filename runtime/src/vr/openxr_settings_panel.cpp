@@ -73,7 +73,7 @@ bool OpenXRSettingsPanelOpen() noexcept {
     return settings_panel_bridge::g_open.load(std::memory_order_acquire);
 }
 
-void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select, float wheel) noexcept {
+void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select, float wheel,uint32_t hand) noexcept {
     auto& published = settings_panel_bridge::Published();
     std::lock_guard lock(published.mutex);
     published.pointer.valid = valid;
@@ -81,6 +81,7 @@ void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select
     published.pointer.y = y;
     published.pointer.select = select;
     published.pointer.wheel += wheel;
+    published.pointer.hand=hand<2?hand:1;
 }
 
 OpenXRSettingsPanelPointer OpenXRTakeSettingsPanelPointer() noexcept {
@@ -89,6 +90,10 @@ OpenXRSettingsPanelPointer OpenXRTakeSettingsPanelPointer() noexcept {
     OpenXRSettingsPanelPointer pointer = published.pointer;
     published.pointer.wheel = 0.0f;
     return pointer;
+}
+OpenXRSettingsPanelPointer OpenXRReadSettingsPanelPointer() noexcept {
+    auto& published=settings_panel_bridge::Published();
+    std::lock_guard lock(published.mutex);return published.pointer;
 }
 
 } // namespace mkw::vr

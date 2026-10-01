@@ -3142,3 +3142,21 @@ void aurora_set_vr_ui_guide(const AuroraVRUiGuide* guide) {
   std::lock_guard lock(aurora::vrui::mutex);
   aurora::vrui::guide=guide?*guide:AuroraVRUiGuide{};
 }
+void aurora_set_vr_hand_workshop(const AuroraVRControllerVertex* triangles,uint32_t count,
+                               uint32_t width,uint32_t height,const uint8_t* rgba,const bool* captured) {
+  if(count>120000 || count%3 || (rgba && (!width || !height || width>1024 || height>1024)))return;
+  std::lock_guard lock(aurora::vrui::mutex);
+  aurora::vrui::workshopActive=captured!=nullptr;
+  if(!captured) {
+    aurora::vrui::workshopModel.clear();
+    aurora::vrui::controllerTextures.erase(aurora::vrui::workshopMaterial);
+    return;
+  }
+  std::copy_n(captured,2,aurora::vrui::workshopCaptured.begin());
+  if(triangles && count)aurora::vrui::workshopModel.assign(triangles,triangles+count);
+  if(rgba) {
+    auto& texture=aurora::vrui::controllerTextures[aurora::vrui::workshopMaterial];
+    texture={};texture.width=width;texture.height=height;
+    texture.pixels.assign(rgba,rgba+size_t(width)*height*4);
+  }
+}

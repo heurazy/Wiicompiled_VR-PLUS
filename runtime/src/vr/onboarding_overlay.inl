@@ -233,18 +233,25 @@ bool MarioKartPaused() {
 void UpdateIntroduction() {
     g_introductionKind=0;
     if (!mkw::vr::OpenXRIsRunning()) {
+        mkw::vr::OpenXREndBodyHandCalibration();
         g_settingsPause={};
         mkw::vr::OpenXRSetIntroductionActive(false);
         mkw::vr::MkwVRPolicySetSettingsVisible(mkw::vr::OpenXRSettingsPanelOpen());
         return;
     }
     EnsureTutorialControllerModels(true);
+    const bool handCalibration=mkw::vr::OpenXRReadBodyHandCalibration().active;
     const auto settingsPolicy=mkw::vr::MkwVRPolicyGetSnapshot();
     const bool settingsRace=settingsPolicy.scene.mode==mkw::vr::VRSceneMode::Race &&
         settingsPolicy.camera.valid && !mkw::vr::MkwVRRaceIntroActive();
-    if(g_settingsPause.Update(settingsRace,mkw::vr::OpenXRSettingsPanelOpen(),
+    if(g_settingsPause.Update(settingsRace,mkw::vr::OpenXRSettingsPanelOpen() || handCalibration,
                              settingsRace && MarioKartPaused(),ImGui::GetTime()))
         mkw::vr::OpenXRRequestTutorialPause();
+    if(handCalibration) {
+        mkw::vr::OpenXRSetIntroductionActive(false);
+        mkw::vr::MkwVRPolicySetSettingsVisible(false);
+        return;
+    }
     if (!RuntimeConfigFile::Get().vrWelcomeComplete) {
         g_introductionKind=1;
     } else {

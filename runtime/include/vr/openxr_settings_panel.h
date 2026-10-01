@@ -39,15 +39,20 @@ struct OpenXRSettingsPanelPointer {
     float y = 0.0f; // canvas pixels, +y down
     bool select = false;
     float wheel = 0.0f; // ImGui wheel steps since the last read, +up
+    uint32_t hand = 1; // controller owning this pointer/select event
 };
 
 // Either thread.
 void OpenXRSetSettingsPanelOpen(bool open) noexcept;
 bool OpenXRSettingsPanelOpen() noexcept;
 // XR thread: this frame's pointer, and wheel steps to add to what is pending.
-void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select, float wheel) noexcept;
+void OpenXRPublishSettingsPanelPointer(bool valid, float x, float y, bool select, float wheel,
+                                      uint32_t hand = 1) noexcept;
 // Game thread: the latest pointer, taking the wheel steps accumulated since the last call.
 OpenXRSettingsPanelPointer OpenXRTakeSettingsPanelPointer() noexcept;
+// Read without consuming scroll events (used to distinguish UI clicks from
+// calibration trigger presses in the hand workshop).
+OpenXRSettingsPanelPointer OpenXRReadSettingsPanelPointer() noexcept;
 
 struct OpenXRUiSnapshot {
     bool active=false;

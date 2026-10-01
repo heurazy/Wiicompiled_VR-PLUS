@@ -1,8 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vr/mkw_vr_first_person.h"
+#include "vr/hand_workshop.h"
 
 #include "gx_native_wheel.h"
+#include "hle_stubs.h"
+#include "vr/body_ik.h"
+#include <atomic>
+#include <chrono>
+#include <memory>
 #include "memory.h"
 #include "runtime_config.h"
 #include "runtime_log.h"
@@ -18,12 +24,19 @@
 #include <string>
 #include <vector>
 
+extern "C" void func_8006FA50(CpuContext* context);
+extern "C" void func_80067F70(CpuContext* context);
 extern "C" void func_805A6C58(CpuContext* context);
 extern "C" void func_8056A470(CpuContext* context);
 extern "C" void func_8056A580(CpuContext* context);
+extern int g_gxFrameCount;
 
 namespace mkw::vr {
 namespace {
+
+std::atomic<unsigned> g_character_hands{0};
+bool CanShowCharacterBodyLocked();
+void ResetCharacterBodyLocked();
 
 // ---------------------------------------------------------------------------
 // PAL RMCP01 object layout.
@@ -371,6 +384,7 @@ struct FirstPersonState {
     SeatedEyeReference seated_eye{};
     uint32_t seated_driver = 0;
     std::optional<float> cockpit_forward;
+    std::optional<float> cockpit_height;
     // Native wheel copies handed to the GX side and not yet dropped.
     bool wheel_arrays_posted = false;
     uint32_t native_wheel_body = 0;
@@ -476,7 +490,7 @@ void RestoreModelVisibilityLocked() noexcept {
 // Applied at the draw boundary: the kart update has set these for the frame and
 // nothing has drawn yet.
 void ApplyModelVisibilityLocked() noexcept {
-    if (!g_visibility.hide_driver) {
+    if (!g_visibility.hide_driver || CanShowCharacterBodyLocked()) {
         RestoreModelVisibilityLocked();
         return;
     }
@@ -644,6 +658,7 @@ bool ReadDriverEye(const KartPoseRead& kart, std::array<float, 3>& eye) noexcept
         g_state.seated_driver = driver;
         g_state.seated_eye = {};
         g_state.cockpit_forward.reset();
+        g_state.cockpit_height.reset();
     }
     if (driver != 0 && g_state.seated_eye.valid) {
         eye = g_state.seated_eye.value;
@@ -699,6 +714,7 @@ bool ReadDriverEye(const KartPoseRead& kart, std::array<float, 3>& eye) noexcept
                     g_state.seated_eye.Observe(measured, safe, true);
                     if (!had_reference && g_state.seated_eye.valid) {
                         g_state.cockpit_forward.reset();
+        g_state.cockpit_height.reset();
                         RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] cockpit: seated eye calibrated at (" << measured[0]
                                                << ", " << measured[1] << ", " << measured[2] << ") units"
                                                << std::endl;
@@ -757,6 +773,20 @@ bool PublishNativeWheelMesh(uint32_t part, const Mtx34& model_view, const Mtx34&
         if (version < 8 || version > 11) {
             return false;
         }
+        const uint32_t mdl_size = Memory::Read32(mdl + 4);
+        const uint8_t* mdl_bytes = mdl_size <= 0x1000000 ? Memory::GetPointer(mdl, mdl_size) : nullptr;
+        Mtx34 body_from_vertices = kIdentityMtx34;
+        Mtx34 wheel_model_view = model_view;
+        if (!whole_part) {
+            // Body::mtx is the model placement, while the bone GX draws the
+            // body's node 0 through may have its own authored transform (the
+            // Baby Booster's rotated root). GX draws its positions through
+            // placement * bone, so both wheel selection and Aurora's
+            // local-player matrix match must include it. It is found by node
+            // id: the Flame Flyer and Cheep Charger list an nw4r_root first.
+            if (!ReadNativeWheelNodeMatrix(mdl_bytes, mdl_size, 0, body_from_vertices.data())) return false;
+            wheel_model_view = ComposeMtx(model_view, body_from_vertices);
+        }
         const uint32_t dic_offset = Memory::Read32(mdl + 0x18);
         if (dic_offset == 0 || dic_offset > 0x100000) {
             return false;
@@ -812,8 +842,13 @@ bool PublishNativeWheelMesh(uint32_t part, const Mtx34& model_view, const Mtx34&
                 for (auto& point : points) {
                     point = detail::TransformPoint(correction, point.x, point.y, point.z);
                 }
-            } else if (RotateNativeWheelVertices(points, center, radius, angle, &correction) < 8) {
-                continue;
+            } else {
+                NativeWheelTopology topology(num);
+                if (!ReadNativeWheelTopology(mdl_bytes, mdl_size, Memory::Read32(header + 0x10), topology) ||
+                    RotateNativeWheelVertices(points, topology, center, radius, angle, &correction,
+                                              body_from_vertices) < 8) {
+                    continue;
+                }
             }
             const uint8_t* source = Memory::GetPointer(data, size);
             if (source == nullptr) {
@@ -842,7 +877,7 @@ bool PublishNativeWheelMesh(uint32_t part, const Mtx34& model_view, const Mtx34&
                     }
                 }
             }
-            if (valid && GxNativeWheel::PostVertices(data, bytes.data(), size, model_view.data())) {
+            if (valid && GxNativeWheel::PostVertices(data, bytes.data(), size, wheel_model_view.data())) {
                 published = true;
                 g_state.wheel_arrays_posted = true;
             }
@@ -1016,7 +1051,7 @@ bool ComputeCockpitAnchorLocked(const Mtx34& view_from_world, const KartPoseRead
     const auto& scale = latch.player_scale;
     // Keep the controls ahead of the seated player even when a long face or a
     // leaned-forward riding animation puts its eye point over them.
-    if (latch.grips_valid && !g_state.cockpit_forward) {
+    if (latch.grips_valid && (!g_state.cockpit_forward || !g_state.cockpit_height)) {
         const auto& left = latch.left_grip;
         const auto& right = latch.right_grip;
         detail::Vec3 center{(left[3] + right[3]) * 0.5f, (left[7] + right[7]) * 0.5f, (left[11] + right[11]) * 0.5f};
@@ -1035,11 +1070,14 @@ bool ComputeCockpitAnchorLocked(const Mtx34& view_from_world, const KartPoseRead
         if (valid && detail::IsFiniteFloat(&center.z)) {
             g_state.cockpit_forward =
                 EyeBehindControls(eye[2], center.z, render_units, std::abs(left[3] - right[3]) * 0.5f);
+            if (detail::IsFiniteFloat(&center.y))
+                g_state.cockpit_height = EyeAboveControls(eye[1], center.y, render_units);
         }
     }
     if (g_state.cockpit_forward) {
         eye[2] = *g_state.cockpit_forward;
     }
+    if (g_state.cockpit_height) eye[1] = *g_state.cockpit_height;
     for (int axis = 0; axis < 3; ++axis) {
         eye[axis] *= scale[axis];
     }
@@ -1254,6 +1292,7 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
     {
         // Same lock the guest thread applies these under.
         std::lock_guard lock(g_mutex);
+        ResetCharacterBodyLocked();
         g_state.mode = static_cast<CameraMode>(RuntimeConfigFile::VrCameraMode());
         g_visibility.hide_driver = g_state.mode == CameraMode::FirstPerson && RuntimeConfigFile::VrFirstPersonHideDriver();
         g_visibility.hidden_model = RuntimeConfigFile::VrFirstPersonHiddenModel();
@@ -1286,6 +1325,7 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
 
 void MkwVRFirstPersonReset() noexcept {
     std::lock_guard lock(g_mutex);
+    ResetCharacterBodyLocked();
     RestoreModelVisibilityLocked();
     g_visibility.logged = false;
     g_visibility.logged_models = false;
@@ -1309,6 +1349,7 @@ void MkwVRFirstPersonReset() noexcept {
     g_state.seated_eye = {};
     g_state.seated_driver = 0;
     g_state.cockpit_forward.reset();
+        g_state.cockpit_height.reset();
     g_state.native_wheel_body = 0;
     g_state.native_wheel_unmatched = 0;
     g_state.native_wheel_fallback = false;
@@ -1317,6 +1358,11 @@ void MkwVRFirstPersonReset() noexcept {
 
 void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_address) noexcept {
     std::lock_guard lock(g_mutex);
+    // Body IK needs the current seat before NW4R CalcView, which precedes the
+    // race Draw observer. A second observation must not advance comfort filters
+    // twice or discard the steering mesh prepared for this same frame.
+    if (g_state.armed && g_state.armed_frame == guest_frame_index &&
+        g_state.camera_address == race_camera_address) return;
     g_state.camera_address = race_camera_address;
     Mtx34 race_view{};
     g_state.race_camera_world_valid = race_camera_address != 0 &&
@@ -1347,6 +1393,7 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
     }
     g_state.bullet_active = bullet;
     if (!g_state.enabled || g_state.opening_pending || bullet) {
+        g_character_hands.store(0, std::memory_order_release);
         g_state.anchor = {};
         g_state.hold_frames = 0;
         g_state.armed = false;
@@ -1356,6 +1403,7 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
         return;
     }
     if (player.failed_step != nullptr || player.accessor != g_state.player_kart.accessor) {
+        ResetCharacterBodyLocked();
         // Do not carry a held anchor or hidden models across an ownership
         // change, including entering spectator mode or an online roster reset.
         RestoreModelVisibilityLocked();
@@ -1493,5 +1541,9 @@ bool MkwVRFirstPersonGetRaceCameraPosition(float out[3]) noexcept {
     std::copy(g_state.race_camera_world.begin(), g_state.race_camera_world.end(), out);
     return true;
 }
+
+#include "character_body_ik.inl"
+REGISTER_NATIVE_FUNCTION_AS(0x8006FA50, CharacterBodyCalcView,
+                            "nw4r::g3d::ScnRoot::CalcView character body IK");
 
 } // namespace mkw::vr

@@ -278,6 +278,12 @@ int main() {
     HitsMapOntoTheCanvas();
     BridgeAccumulatesWheelUntilTaken();
     {
+        OpenXRPublishSettingsPanelPointer(true,20,30,true,0,0);
+        Check(OpenXRTakeSettingsPanelPointer().hand==0,"left trigger pointer ownership survives publication");
+        OpenXRPublishSettingsPanelPointer(true,20,30,true,0,1);
+        Check(OpenXRTakeSettingsPanelPointer().hand==1,"right trigger pointer ownership survives publication");
+    }
+    {
         OpenXRPublishPhysicalOptionsButtons({true,true,true});
         const auto physical=OpenXRReadPhysicalOptionsButtons();
         Check(physical.valid && physical.x && physical.y,"SteamVR publishes both physically held buttons together");

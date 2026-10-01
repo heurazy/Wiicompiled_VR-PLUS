@@ -220,6 +220,12 @@ Copy-Directory (Join-Path $repoRoot 'projects\mkwii') (Join-Path $workspace 'pro
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LocalBuild.ps1') -Destination (Join-Path $workspace 'LocalBuild.ps1')
 # LocalBuild.ps1 dot-sources the canonical configure flags from this sibling.
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'NativeBuildFlags.ps1') -Destination (Join-Path $workspace 'NativeBuildFlags.ps1')
+# Only the PC Quest build helpers are needed; never copy Android caches or game libraries.
+$questHelpers = Join-Path $workspace 'android'
+[IO.Directory]::CreateDirectory($questHelpers) | Out-Null
+foreach ($helper in @('QuestGameKit.psm1', 'Build-QuestGame.ps1')) {
+    Copy-Item -LiteralPath (Join-Path $repoRoot "android\$helper") -Destination (Join-Path $questHelpers $helper)
+}
 [IO.Directory]::CreateDirectory((Join-Path $workspace 'Dependencies')) | Out-Null
 foreach ($name in $requiredDependencies) { Copy-Directory (Join-Path $dependencySources $name) (Join-Path $workspace "Dependencies\$name") }
 
@@ -285,7 +291,7 @@ foreach ($required in @('ToolkitFingerprint','TranslationFingerprint','NativeToo
 $manifest = [ordered]@{
     ProductId = 'wiicompiled-openxr-vr'
     SchemaVersion = 2
-    ProductVersion = '1.2.0'
+    ProductVersion = '1.3.0'
     ExpectedGameId = $pins.GameId
     ExpectedDolSha256 = $pins.DolSha256
     ExpectedRelSha256 = $pins.RelSha256

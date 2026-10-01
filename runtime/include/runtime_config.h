@@ -1,5 +1,6 @@
 #pragma once
 #include "vr/control_settings.h"
+#include "vr/body_hand_defaults.h"
 
 #include <algorithm>
 #include <array>
@@ -7,6 +8,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -95,6 +97,9 @@ struct RuntimeUserConfig {
     std::optional<float> vrFirstPersonHeadUpMeters;
     std::optional<float> vrFirstPersonHeadForwardMeters;
     std::optional<float> vrFirstPersonHeadRightMeters;
+    std::optional<bool> vrBodyIk;
+    std::optional<bool> vrBodyIkHandsOnly;
+    std::map<std::string,std::vector<float>> vrBodyHandCalibrations = mkw::vr::DefaultBodyHandCalibrations();
     std::optional<bool> vrFirstPersonHideDriver;
     std::optional<int32_t> vrFirstPersonHiddenModel;
     std::optional<std::string> vrFirstPersonRotation;
@@ -603,7 +608,9 @@ inline void EnsureConfigFile() {
               "# In first person the driver sits where your eyes are. Hiding\n"
               "# the driver removes the head that would otherwise be in the\n"
               "# way; hiding the kart removes the vehicle around you too.\n"
-              "first_person_hide_driver = true\n"
+              "body_ik = true\n"
+              "body_ik_hands_only = false\n"
+        "first_person_hide_driver = true\n"
               "# 0 is the driver, which is the usual choice. -1 hides every\n"
               "# model of your kart, the vehicle included.\n"
               "first_person_hidden_model = 0\n"
@@ -873,6 +880,9 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
         *value <= kVrFirstPersonHeadOffsetLimit) {
         config.vrFirstPersonHeadRightMeters = *value;
     }
+    config.vrBodyIk = FindConfigValue<bool>(document, "vr", "body_ik");
+    config.vrBodyIkHandsOnly = FindConfigValue<bool>(document, "vr", "body_ik_hands_only");
+    // Character palm profiles are fixed product defaults; legacy user overrides are ignored.
     config.vrFirstPersonHideDriver =
         FindConfigValue<bool>(document, "vr", "first_person_hide_driver");
     if (auto value = FindConfigValue<std::string>(document, "vr", "recenter_key")) {
@@ -1264,6 +1274,16 @@ inline bool SetVrLeanBackDegrees(float value) {
     std::ostringstream formatted;
     formatted << value;
     return WriteSetting("vr", "lean_back_degrees", formatted.str());
+}
+
+inline bool SetVrBodyIk(bool value) {
+    Mutable().vrBodyIk = value;
+    return WriteSetting("vr", "body_ik", value ? "true" : "false");
+}
+
+inline bool SetVrBodyIkHandsOnly(bool value) {
+    Mutable().vrBodyIkHandsOnly = value;
+    return WriteSetting("vr", "body_ik_hands_only", value ? "true" : "false");
 }
 
 inline bool SetVrFirstPersonHideDriver(bool value) {
@@ -1779,6 +1799,9 @@ inline float VrLeanBackDegrees(float fallback = kVrLeanBackDegreesDefault) {
     return std::clamp(Get().vrLeanBackDegrees.value_or(fallback),
                       -kVrLeanBackDegreesLimit, kVrLeanBackDegreesLimit);
 }
+
+inline bool VrBodyIk() { return Get().vrBodyIk.value_or(true); }
+inline bool VrBodyIkHandsOnly() { return Get().vrBodyIkHandsOnly.value_or(false); }
 
 inline bool VrFirstPersonHideDriver(bool fallback = kVrFirstPersonHideDriverDefault) {
     return Get().vrFirstPersonHideDriver.value_or(fallback);

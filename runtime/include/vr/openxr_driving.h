@@ -25,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <string>
 
 namespace mkw::vr {
 
@@ -39,6 +40,10 @@ struct DrivingHand {
 
 struct DrivingSnapshot {
     // The first-person cockpit is engaged and the controllers are mapped into it.
+    uint64_t published_ns = 0;
+    uint64_t vehicle_identity = 0;
+    bool head_tracked = false;
+    std::array<float, 12> seat_from_head{1,0,0,0,0,1,0,0,0,0,1,0};
     bool cockpit_active = false;
     // Hand steering is on: a squeezed grip near the wheel takes hold of it.
     bool hand_steering = false;
@@ -62,6 +67,31 @@ struct DrivingSnapshot {
 // (nothing held, centred) is returned before the first publication.
 void OpenXRPublishDriving(const DrivingSnapshot& snapshot) noexcept;
 DrivingSnapshot OpenXRReadDriving() noexcept;
+
+// Game thread publishes the avatar wrist poses in seat metres. During a
+// calibration they freeze while the real controller poses continue updating.
+struct BodyHandCalibration {
+    bool active=false;
+    uint64_t vehicle=0;
+    std::string model;
+    std::array<bool,2> valid{}, captured{};
+    std::array<std::array<float,12>,2> seat_from_wrist{};
+};
+BodyHandCalibration OpenXRReadBodyHandCalibration();
+void OpenXRPublishBodyHandPose(uint64_t vehicle, const std::string& model, unsigned hand,
+                             const std::array<float,12>& seat_from_wrist);
+bool OpenXRBeginBodyHandCalibration();
+void OpenXRMarkBodyHandCaptured(unsigned hand);
+void OpenXREndBodyHandCalibration();
+struct HandWorkshopTracking {
+    std::array<bool,2> tracked{};
+    std::array<std::array<float,12>,2> panel_from_grip{};
+    uint64_t published_ns=0;
+};
+void OpenXRPublishHandWorkshopTracking(HandWorkshopTracking tracking);
+HandWorkshopTracking OpenXRReadHandWorkshopTracking();
+void OpenXRSetHandWorkshopActive(bool active);
+bool OpenXRHandWorkshopActive();
 
 namespace driving {
 

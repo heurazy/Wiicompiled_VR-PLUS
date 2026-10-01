@@ -434,6 +434,14 @@ foreach(test_name mkw_steering_wheel_tests mkw_vr_cockpit_tests mkw_vr_hand_stee
     add_test(NAME ${test_name} COMMAND ${test_name})
 endforeach()
 
+# Calibration publishes stable avatar references across game and XR threads.
+add_executable(mkw_body_hand_calibration_tests
+    "${CMAKE_CURRENT_LIST_DIR}/tests/body_hand_calibration_tests.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/src/vr/openxr_driving.cpp")
+target_include_directories(mkw_body_hand_calibration_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/include")
+target_compile_features(mkw_body_hand_calibration_tests PRIVATE cxx_std_17)
+add_test(NAME mkw_body_hand_calibration_tests COMMAND mkw_body_hand_calibration_tests)
+
 # The USB wheel's calibration and GameCube pad mapping (physical_wheel.h),
 # ported from heurazy's mario-kart-wii-VR-port. Header-only; needs dolphin/pad.h.
 add_executable(mkw_physical_wheel_tests "${CMAKE_CURRENT_LIST_DIR}/tests/physical_wheel_tests.cpp")
@@ -670,7 +678,7 @@ else()
 endif()
 
 if(MKW_BUILD_TESTS)
-foreach(port_test IN ITEMS quest_input openxr_controller_profiles adaptive_resolution)
+foreach(port_test IN ITEMS quest_input openxr_controller_profiles adaptive_resolution body_ik hand_workshop)
   add_executable(mkw_${port_test}_tests tests/${port_test}_tests.cpp)
   target_include_directories(mkw_${port_test}_tests PRIVATE include ../aurora-main/include)
   target_compile_features(mkw_${port_test}_tests PRIVATE cxx_std_20)

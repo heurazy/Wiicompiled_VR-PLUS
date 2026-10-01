@@ -192,7 +192,14 @@ inline void build_geometry(const AuroraCockpit& cockpit, std::vector<Vertex>& ve
   std::array<std::shared_ptr<const HandMesh>,2> current;
   { std::lock_guard lock(meshMutex);current=meshes; }
   for(int side=0;side<2;++side) if(cockpit.hands[side].tracked) {
-    if(current[side]) runtime_hand(vertices,cockpit.hands[side],*current[side]);
+    const auto& hand=cockpit.hands[side];
+    if(hand.calibrationMarker) {
+      const V color=hand.calibrationCaptured?V{0.15f,1.0f,0.25f}:V{0.08f,0.45f,1.0f};
+      for(int axis=0;axis<3;++axis) {
+        V a{},b{};a[axis]=-0.025f;b[axis]=0.025f;
+        tube(vertices,point(hand.seatFromGrip,a),point(hand.seatFromGrip,b),0.002f,color,6);
+      }
+    } else if(current[side]) runtime_hand(vertices,cockpit.hands[side],*current[side]);
     else glove(vertices,cockpit.hands[side],side);
   }
 }
@@ -210,6 +217,7 @@ struct SceneDepth {
 };
 inline uint32_t pipelineSamples=0;
 inline bool pipelineReversedDepth=false;
+inline bool pipelineCalibration=false;
 inline wgpu::TextureFormat pipelineFormat{}, pipelineDepthFormat{};
 inline std::array<wgpu::Buffer,2> vertexBuffers;
 inline std::array<uint64_t,2> vertexCapacity{};
@@ -223,7 +231,8 @@ inline void render(wgpu::CommandEncoder& cmd,const StereoReplayFrame& frame,uint
   // The guest can reverse its viewport depth independently of Aurora's
   // global reversed-Z convention. The final 1/d coefficient is authoritative.
   const bool reversedDepth=sceneDepth.constant>0;
-  if(!pipeline||pipelineSamples!=target.msaaSamples||pipelineFormat!=format||pipelineReversedDepth!=reversedDepth||pipelineDepthFormat!=target.depthFormat) {
+  const bool calibration=frame.cockpit.hands[0].calibrationMarker || frame.cockpit.hands[1].calibrationMarker;
+  if(!pipeline||pipelineSamples!=target.msaaSamples||pipelineFormat!=format||pipelineReversedDepth!=reversedDepth||pipelineDepthFormat!=target.depthFormat||pipelineCalibration!=calibration) {
     wgpu::ShaderSourceWGSL source{};
     source.code=R"(
       struct Out { @builtin(position) position: vec4f, @location(0) color: vec3f };
@@ -242,8 +251,8 @@ inline void render(wgpu::CommandEncoder& cmd,const StereoReplayFrame& frame,uint
     const bool stencil=target.depthFormat==wgpu::TextureFormat::Depth24PlusStencil8;
     const wgpu::StencilFaceState mark{.compare=wgpu::CompareFunction::Always,
       .passOp=stencil?wgpu::StencilOperation::Replace:wgpu::StencilOperation::Keep};
-    const wgpu::DepthStencilState depth{.format=target.depthFormat,.depthWriteEnabled=true,
-      .depthCompare=reversedDepth?wgpu::CompareFunction::GreaterEqual:wgpu::CompareFunction::LessEqual,
+    const wgpu::DepthStencilState depth{.format=target.depthFormat,.depthWriteEnabled=!calibration,
+      .depthCompare=calibration?wgpu::CompareFunction::Always:reversedDepth?wgpu::CompareFunction::GreaterEqual:wgpu::CompareFunction::LessEqual,
       .stencilFront=mark,.stencilBack=mark,.stencilReadMask=1,.stencilWriteMask=stencil?1u:0u};
     wgpu::RenderPipelineDescriptor desc{};desc.label="VR cockpit";
     desc.vertex={.module=shader,.entryPoint="vs",.bufferCount=1,.buffers=&layout};
@@ -251,6 +260,7 @@ inline void render(wgpu::CommandEncoder& cmd,const StereoReplayFrame& frame,uint
     desc.primitive.topology=wgpu::PrimitiveTopology::TriangleList;
     pipeline=g_device.CreateRenderPipeline(&desc);pipelineSamples=target.msaaSamples;pipelineFormat=format;
     pipelineReversedDepth=reversedDepth;pipelineDepthFormat=target.depthFormat;
+    pipelineCalibration=calibration;
   }
   const auto revision=meshRevision.load();
   if(cachedMeshRevision!=revision || std::memcmp(&cachedCockpit,&frame.cockpit,sizeof(AuroraCockpit))!=0) {

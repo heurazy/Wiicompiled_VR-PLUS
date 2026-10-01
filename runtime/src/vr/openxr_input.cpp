@@ -788,7 +788,7 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
     }
     // The game thread may open or close the panel too; only a change made here
     // is written back.
-    const bool introduction = OpenXRIntroductionActive();
+    const bool introduction = OpenXRIntroductionActive() && !OpenXRHandWorkshopActive();
     const bool was_open = OpenXRSettingsPanelOpen();
     bool open = was_open || introduction;
     settings_panel::Frame panel =
@@ -797,11 +797,14 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
     PublishSettingsPanel(input_time, settings_panel, panel);
     // Introduction visibility is temporary and must never latch the settings
     // flag, including when the game thread finishes it during this input frame.
-    if (!introduction && !OpenXRIntroductionActive() && open != was_open) {
+    if (!introduction && (!OpenXRIntroductionActive() || OpenXRHandWorkshopActive()) && open != was_open) {
         Log(OpenXRLogLevel::Info, open ? "VR settings opened with controller chord" : "VR settings closed with controller chord");
         OpenXRSetSettingsPanelOpen(open);
     }
 
+    // Calibration owns the controls while the game continues rendering its
+    // paused cockpit. Raw UiSnapshot buttons remain available for capture.
+    panel.withheld |= OpenXRReadBodyHandCalibration().active;
     // A clean right-thumbstick click toggles the first-person camera. It fires
     // on release, so the two-thumbstick panel chord never toggles it, and
     // never while the panel has the controllers.
@@ -932,7 +935,7 @@ void OpenXRInput::PublishSettingsPanel(XrTime input_time, const OpenXRPointerScr
         ApplyHaptic(frame.pointing_hand, 0.35f, kTickNs);
     }
     m_panel_select_held = frame.select;
-    OpenXRPublishSettingsPanelPointer(valid, point[0], point[1], frame.select, frame.wheel);
+    OpenXRPublishSettingsPanelPointer(valid, point[0], point[1], frame.select, frame.wheel,frame.pointing_hand);
 }
 
 void OpenXRInput::PublishWiiRemote(XrTime input_time, const OpenXRPointerScreen& screen,
@@ -1045,6 +1048,7 @@ void OpenXRInput::UpdateDriving(XrTime display_time, const driving::SeatFrame& s
 
     DrivingSnapshot snapshot{};
     snapshot.cockpit_active = true;
+    snapshot.vehicle_identity = anchor.vehicle_identity;
     snapshot.hand_steering = hand_steering;
     snapshot.bike = anchor.bike;
     // The vehicle's own control is the one turning (or none is shown at all),
@@ -1079,6 +1083,15 @@ void OpenXRInput::UpdateDriving(XrTime display_time, const driving::SeatFrame& s
 
     constexpr XrSpaceLocationFlags kPoseValid =
         XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+    XrSpaceLocation head_location{XR_TYPE_SPACE_LOCATION};
+    if (XR_SUCCEEDED(xrLocateSpace(m_runtime->ViewSpace(), m_runtime->AppSpace(), display_time, &head_location)) &&
+        (head_location.locationFlags & kPoseValid) == kPoseValid) {
+        const auto& pose = head_location.pose;
+        snapshot.head_tracked = true;
+        snapshot.seat_from_head = driving::SeatFromApp(seat,
+            {pose.position.x,pose.position.y,pose.position.z},
+            {pose.orientation.x,pose.orientation.y,pose.orientation.z,pose.orientation.w});
+    }
     std::array<WheelHand, kHands> wheel_hands{};
     for (uint32_t hand = 0; hand < kHands; ++hand) {
         bool tracked = false;
@@ -1096,7 +1109,7 @@ void OpenXRInput::UpdateDriving(XrTime display_time, const driving::SeatFrame& s
         }
         const float squeeze = hands[hand].squeeze;
         // Hands are shown only while they can steer.
-        snapshot.hands[hand] = {tracked && hand_steering, false, squeeze, seat_from_grip};
+        snapshot.hands[hand] = {tracked && (hand_steering || RuntimeConfigFile::VrBodyIk()), false, squeeze, seat_from_grip};
         wheel_hands[hand] = {seat_from_grip[3], seat_from_grip[7], seat_from_grip[11], squeeze, tracked};
         if (uses_geometry) {
             wheel_hands[hand] = geometry.ToWheel(wheel_hands[hand]);

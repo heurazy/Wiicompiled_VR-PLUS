@@ -1348,7 +1348,9 @@ private:
     }
     void BuildMenuUi(const OpenXRBackendFrame& source, AuroraStereoFrame& destination) noexcept {
         XrPosef panel{};
-        if ((RuntimeConfigFile::Get().vrMenuShaderQuality==0 && !OpenXRIntroductionActive()) || !MenuScreenPose(source,panel)) return;
+        if ((RuntimeConfigFile::Get().vrMenuShaderQuality==0 && !OpenXRIntroductionActive()) || !MenuScreenPose(source,panel)) {
+            OpenXRPublishHandWorkshopTracking({});return;
+        }
         destination.ui.anchored=true;
         destination.ui.distance=source.presentation.quad_distance_meters;
         destination.ui.width=source.presentation.quad_width_meters;
@@ -1375,6 +1377,12 @@ private:
             ProjectionFromFov(source.xr_frame.views[eye].fov,destination.eyes[eye].projection);
             ViewFromPose(source.xr_frame.views[eye].pose,panel,destination.ui.eyeFromPanel[eye]);
         }
+        HandWorkshopTracking workshop{};
+        for(unsigned hand=0;hand<2;++hand) {
+            workshop.tracked[hand]=destination.ui.tracked[hand];
+            std::copy_n(destination.ui.panelFromGrip[hand],12,workshop.panel_from_grip[hand].begin());
+        }
+        OpenXRPublishHandWorkshopTracking(workshop);
     }
     void BuildHandHud(const OpenXRBackendFrame& source, AuroraStereoFrame& destination) noexcept {
         const auto input=OpenXRReadUiSnapshot();
@@ -1400,7 +1408,8 @@ private:
                       float lean_back_radians, AuroraCockpit& cockpit) noexcept {
         cockpit.unitsPerMeter = units_per_meter;
         const DrivingSnapshot driving = input_ != nullptr ? input_->Driving() : DrivingSnapshot{};
-        if (driving.hand_steering && !hand_meshes_loaded_ && runtime_ != nullptr) {
+        const auto calibration=OpenXRReadBodyHandCalibration();
+        if ((driving.hand_steering || RuntimeConfigFile::VrBodyIk()) && !hand_meshes_loaded_ && runtime_ != nullptr) {
             hand_meshes_loaded_ = true;
             const bool loaded = LoadRuntimeHandMeshes(*runtime_);
             RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] cockpit hands: "
@@ -1408,12 +1417,12 @@ private:
                                    << std::endl;
         }
         cockpit.active = driving.cockpit_active && position_valid && base_position_valid_ &&
-                         (driving.synthetic_control || driving.hand_steering);
+                         (driving.synthetic_control || driving.hand_steering || RuntimeConfigFile::VrBodyIk());
         if (!cockpit.active) {
             return;
         }
         cockpit.wheelAngle = driving.visual_angle;
-        cockpit.nativeWheel = !driving.synthetic_control;
+        cockpit.nativeWheel = calibration.active || !driving.synthetic_control;
         cockpit.bike = driving.bike;
         cockpit.handlebarRadius = driving.control.radius;
         for (int row = 0; row < 3; ++row) {
@@ -1429,7 +1438,9 @@ private:
         for (size_t hand = 0; hand < 2; ++hand) {
             auto& target = cockpit.hands[hand];
             const auto& from = driving.hands[hand];
-            target.tracked = from.tracked;
+            target.tracked = from.tracked && (calibration.active || !MkwVRCharacterHandActive(hand));
+            target.calibrationMarker=calibration.active;
+            target.calibrationCaptured=calibration.captured[hand];
             target.held = from.held;
             target.squeeze = from.squeeze;
             std::copy(from.seat_from_grip.begin(), from.seat_from_grip.end(), target.seatFromGrip);

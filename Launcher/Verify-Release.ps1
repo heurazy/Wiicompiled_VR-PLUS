@@ -2,7 +2,8 @@
 param([string]$Tag, [string]$SetupPath)
 $ErrorActionPreference = 'Stop'
 $version = ([xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'Directory.Build.props') -Raw)).Project.PropertyGroup.Version
-if ($Tag -and $Tag -cne "v$version") { throw "Release tag must be v$version, got $Tag" }
+$shortVersion = $version -replace '\.0$', ''
+if ($Tag -and $Tag -cne "v$version" -and $Tag -cne "v$shortVersion") { throw "Release tag must be v$version or v$shortVersion, got $Tag" }
 if ($SetupPath) {
     $reported = (& $SetupPath --version | Out-String).Trim()
     if ($LASTEXITCODE -ne 0 -or $reported -cne $version) { throw 'Setup executable version mismatch.' }

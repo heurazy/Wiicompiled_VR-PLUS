@@ -8,7 +8,7 @@ This repository contains source code, build tools and integration patches. It do
 
 [Browse Wiicompiled VR PLUS](https://github.com/heurazy/Wiicompiled_VR-PLUS) · [Release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases) · [Original Mario Kart Wii VR port](https://github.com/heurazy/mario-kart-wii-VR-port)
 
-> The PLUS repository currently has no published release assets. Instructions and binaries from the original port's releases are for that project and may not match this fork.
+> Download the Windows installer, portable launcher bundle or Quest APK from this fork's [latest release](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases/latest).
 
 ## What this fork adds
 
@@ -16,8 +16,9 @@ Compared with the original Mario Kart Wii VR port, this fork brings together the
 
 
 - **Quest Touch Plus controllers:** textured controller models, animated buttons and thumbsticks, pointer interaction in menus and controller specific tutorial diagrams.
-- **Comfortable driving cameras:** original, first person and diorama views. First person hides the driver and adjusts for different character heights. A right stick click changes view. Optional kart movement modes include a smoothed Safe mode that follows sustained slopes and banks.
+- **Comfortable driving cameras:** original, first person and diorama views. First person hides the driver's head and adjusts for different character heights. A right stick click changes view. Optional kart movement modes include a smoothed Safe mode that follows sustained slopes and banks.
 - **Physical driving controls:** tracked hands can grip and turn the kart wheel or motorcycle handlebars. Steering supports one or two hands, passing through the centre, continuous full turns and brief tracking loss. Native vehicle steering animation can be switched off. USB wheels, pedals and paddle buttons can be calibrated; feedback is optional and light.
+- **Character body IK:** in the first-person cockpit, your selected character's own textured body and hands replace the VR gloves. Shoulders, elbows and wrists follow the tracked controllers; the torso stays stable while legs retain driving and drift movements. Trick and boost celebrations are suppressed. The head is hidden, and arm reach fits human proportions. Toggle **Character body IK** in **VR settings → Cameras**. Hand placement uses fixed built-in calibration profiles for the 24 original characters. See [body IK behavior and current limits](docs/BODY-IK.md).
 - **Spatial VR UI:** the camera chooser, VR settings, controller tutorials and supported Mario Kart menus sit in VR space and can be selected with a pointer. The first launch explains camera choice and controls; tutorials can be reset in settings.
 - **VR HUD and visibility fixes:** the circuit map and item panel appear on the left hand, while first person anchors its HUD ahead of the seat. Hand depth, track object culling, race menu rendering, display orientation and the Bullet Bill camera have dedicated VR handling.
 - **Performance controls:** per eye resolution, sharpening, refresh preference, adaptive resolution, diagnostics and menu shader quality. Frame interpolation is disabled on Quest because it makes the standalone presentation unstable; the game's simulation speed remains unchanged.
@@ -35,8 +36,6 @@ See [controls and packaging](docs/PORT-CONTROLS-AND-PACKAGING.md) for exact bind
 upgrade behavior and the remaining hardware validation.
 
 ## Roadmap
-- new hand models : planned
-- fix character height : planned
 - better motorcycle controls : planned
 - more vehicles visual steering wheel compatibility : planned
 - more control options : planned
@@ -44,6 +43,8 @@ upgrade behavior and the remaining hardware validation.
 <details>
   <summary><h2>DONE</h2></summary>
 
+  - new hand models: selected character's textured hands and body IK, with built-in hand placement profiles
+  - fix character height: cockpit height and steering reach adapt to the selected character
   - automatic correction of upside-down race output: included in v1.1; feedback from affected headsets welcome
   - sim racing steering wheels and pedals: included in v1.1; hardware compatibility testing continues
   - fix low FPS in menu: menus can render above 60 FPS without accelerating the game
@@ -61,8 +62,8 @@ upgrade behavior and the remaining hardware validation.
 - Native OpenXR rendering through D3D12 with a desktop mirror and a safe desktop fallback.
 - Three race cameras: the original game camera, a true first-person cockpit camera, and a distant
   diorama camera. The right-stick click cycles cameras during a race.
-- A seated cockpit aligned to the driver's evaluated eye position. The driver is hidden in first
-  person, and the view adapts to small, tall, and temporarily resized characters.
+- A seated cockpit aligned to the driver's evaluated eye position. Character body IK shows the
+  tracked body and hands with the head hidden; the view adapts to small, tall, and temporarily resized characters.
 - Physical steering: grab the real kart wheel or motorcycle handlebar with either tracked hand.
   Native vehicle animation is enabled by default and can be disabled in VR settings.
 - Two-hand steering with centre-crossing and brief tracking-loss tolerance, adaptive smoothing,
@@ -98,7 +99,7 @@ upgrade behavior and the remaining hardware validation.
 
 ### Guided installer
 
-1. Download the Windows setup asset from this fork's [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases), when one is available.
+1. Download the Windows setup asset from this fork's [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases).
 2. Start SteamVR, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
@@ -111,7 +112,7 @@ finishes. Select **Mario Kart Wii VR** or **Retro Rewind VR** from that launcher
 
 ### Portable bundle
 
-Download this fork's portable archive from its [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases), when one is available. Extract the complete folder and run
+Download this fork's portable archive from its [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases). Extract the complete folder and run
 `WiiCompiled-Setup.exe`. Keep **portable installation** enabled and keep the folder together.
 Start the launcher with `Launch-WiiCompiled-VR.cmd` or `WheelWizard/WheelWizard.exe`. The
 `UserData` folder keeps configuration, NAND, cache and logs beside the portable installation.

@@ -6,6 +6,10 @@ struct Vertex { float clip[4],uv[2],color[3],textured; float origin[3]{}; };
 std::mutex mutex;
 AuroraVRUiGuide guide{};
 std::array<std::vector<AuroraVRControllerVertex>,2> models;
+std::vector<AuroraVRControllerVertex> workshopModel;
+bool workshopActive=false;
+std::array<bool,2> workshopCaptured{};
+constexpr uint32_t workshopMaterial=0xfffffff0u;
 struct ControllerTexture {
   uint32_t width=0,height=0;
   std::vector<uint8_t> pixels;
@@ -122,6 +126,9 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
     drawVertices(output.view,source.bindGroup,sky,3,wgpu::LoadOp::Clear);
   }
   std::vector<Vertex> vertices;
+  bool workshop=false;
+  std::array<bool,2> captured{};
+  {std::lock_guard lock(mutex);workshop=workshopActive;captured=workshopCaptured;}
   struct MaterialRange { uint32_t first,count; wgpu::BindGroup binding; };
   std::vector<MaterialRange> materialRanges;
   const auto vertex=[&](V p,float u,float v,V c,float t) {
@@ -182,7 +189,16 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
         material.binding=webgpu::create_copy_bind_group(material.texture.CreateView(),g_device.CreateSampler(&sd));
         material.pixels.clear();
       }
-      for(int hand=0;hand<2;++hand) if(frame.ui.tracked[hand]) {
+      if(workshop) for(size_t i=0;i+2<workshopModel.size();i+=3) {
+        Triangle tri{};tri.material=workshopMaterial;
+        for(int j=0;j<3;++j) {
+          const auto& v=workshopModel[i+j];
+          tri.v[j]=vertex({v.position[0],v.position[1],v.position[2]},v.uv[0],v.uv[1],{1,1,1},2);
+          tri.depth+=tri.v[j].clip[3];
+        }
+        triangles.push_back(tri);
+      }
+      for(int hand=0;hand<2;++hand) if(!workshop && frame.ui.tracked[hand]) {
         const auto& model=models[hand];
         for(size_t i=0;i+2<model.size();i+=3) {
           Triangle tri{};
@@ -210,7 +226,18 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
     const auto labelStart=static_cast<uint32_t>(vertices.size());
     std::array<std::array<V,5>,2> buttonPositions;
     { std::lock_guard lock(mutex); buttonPositions=anchors; }
-    if(layout.active) for(int hand=0;hand<2;++hand) if(frame.ui.tracked[hand]) for(int row=0;row<5;++row) {
+    if(workshop) for(int hand=0;hand<2;++hand) if(frame.ui.tracked[hand]) {
+      const auto* m=frame.ui.panelFromGrip[hand];
+      const V color=captured[hand]?V{.12f,1.f,.3f}:V{.08f,.5f,1.f};
+      for(int axis=0;axis<3;++axis) {
+        V a{},b{};a[axis]=-.025f;b[axis]=.025f;a=point(m,a);b=point(m,b);
+        const int across=axis==0?1:0;
+        auto a0=a,a1=a,b0=b,b1=b;a0[across]-=.0015f;a1[across]+=.0015f;b0[across]-=.0015f;b1[across]+=.0015f;
+        vertices.insert(vertices.end(),{vertex(a0,0,0,color,0),vertex(a1,0,0,color,0),vertex(b0,0,0,color,0),
+          vertex(a1,0,0,color,0),vertex(b1,0,0,color,0),vertex(b0,0,0,color,0)});
+      }
+    }
+    if(layout.active && !workshop) for(int hand=0;hand<2;++hand) if(frame.ui.tracked[hand]) for(int row=0;row<5;++row) {
       const auto* m=frame.ui.panelFromGrip[hand];
       const V c{m[3]+(hand?1.f:-1.f)*.23f,m[7]+.17f-row*.078f,m[11]-.08f};
       const auto* uv=layout.labels[hand*5+row];

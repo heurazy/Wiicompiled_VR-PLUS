@@ -126,6 +126,8 @@ typedef enum {
 typedef struct {
   bool tracked;
   bool held;
+  bool calibrationMarker;
+  bool calibrationCaptured;
   float squeeze;
   float seatFromGrip[12];
 } AuroraCockpitHand;
@@ -202,6 +204,10 @@ void aurora_set_vr_controller_texture(uint32_t material, uint32_t width, uint32_
 void aurora_set_vr_controller_anchors(uint32_t hand, const float* positions);
 void aurora_set_vr_menu_shader_quality(int quality);
 void aurora_set_vr_ui_guide(const AuroraVRUiGuide* guide);
+// Independent preview mesh in the anchored menu's coordinate system. Passing
+// null vertices/captured disables it; texture pixels are copied only on load.
+void aurora_set_vr_hand_workshop(const AuroraVRControllerVertex* triangles, uint32_t count,
+                               uint32_t width, uint32_t height, const uint8_t* rgba, const bool* captured);
 
 /**
  * Called on Aurora's frame worker immediately before a GX frame is sealed.
