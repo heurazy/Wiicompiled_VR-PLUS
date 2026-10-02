@@ -13,6 +13,7 @@
 #include "runtime_log.h"
 #include "vr/camera_toggle.h"
 #include "vr/body_ik.h"
+#include "vr/controller_model_connection.h"
 #include "vr/openxr_driving.h"
 #include "vr/mkw_vr_first_person.h"
 #include "vr/mkw_vr_policy.h"
@@ -36,6 +37,7 @@ extern "C" void func_80554E14(CpuContext* context);
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 #include <SDL3/SDL_mouse.h>

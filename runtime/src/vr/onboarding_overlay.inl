@@ -12,7 +12,8 @@ struct TutorialInput {
 };
 TutorialInput TutorialControls() {
     const auto ui=mkw::vr::OpenXRReadUiSnapshot();
-    TutorialInput input{};input.active=ui.active;input.steamvr=true;
+    TutorialInput input{};input.active=ui.active;
+    input.steamvr=mkw::vr::OpenXRReadPortControls().steamvr;
     input.remote=mkw::vr::OpenXRGetControllerMode()==mkw::vr::OpenXRControllerMode::WiiRemote;
     input.ui_hands=ui.hands;input.steering_x=ui.buttons[0].stick_x;
     input.trick=ui.buttons[0].primary;input.item=ui.buttons[0].secondary;
@@ -76,9 +77,7 @@ bool PublishFallbackTutorialControllers() {
     return true;
 }
 
-#if defined(__ANDROID__)
 #include "quest_controller_models.inl"
-#endif
 
 #if defined(_WIN32)
 HMODULE LoadOpenVrLibraryForTutorial() {
@@ -97,29 +96,29 @@ HMODULE LoadOpenVrLibraryForTutorial() {
 #include "steam_controller_models.inl"
 
 bool PublishSteamVrTutorialControllers() {
-    using InitFn=uint32_t (*)(EVRInitError*,EVRApplicationType);
     using GetInterfaceFn=intptr_t (*)(const char*,EVRInitError*);
-    HMODULE library=LoadOpenVrLibraryForTutorial();
+    // Loading a DLL and initializing its client must never be repeated once
+    // per display frame when SteamVR is missing or unavailable.
+    static HMODULE library=LoadOpenVrLibraryForTutorial();
     if(!library) return false;
-    const auto init=reinterpret_cast<InitFn>(GetProcAddress(library,"VR_InitInternal"));
     const auto getInterface=reinterpret_cast<GetInterfaceFn>(GetProcAddress(library,"VR_GetGenericInterface"));
-    if(!init || !getInterface) return false;
+    if(!getInterface) return false;
     EVRInitError error=EVRInitError_VRInitError_None;
-    // Utility clients cannot query tracked devices. A background client can
-    // read controller models without taking the OpenXR scene application's focus.
-    // Keep this shared OpenVR client alive: shutting it down here can invalidate
-    // interfaces still used by SDL or the SteamVR OpenXR runtime.
-    static bool initialized=false;
-    if(!initialized) {
-        init(&error,EVRApplicationType_VRApplication_Background);
-        initialized=error==EVRInitError_VRInitError_None;
-    }
-    if(error!=EVRInitError_VRInitError_None) {
-        std::fprintf(stderr,"[vr-tutorial] OpenVR background initialization failed: %d; using fallback models\n",int(error));
-        return false;
-    }
     const std::string systemName=std::string("FnTable:")+IVRSystem_Version;
     const std::string renderName=std::string("FnTable:")+IVRRenderModels_Version;
+    static mkw::vr::ControllerModelConnection connection;
+    const bool connected=connection.Connect(true,[&] {
+        error=EVRInitError_VRInitError_None;
+        const bool ready=getInterface(systemName.c_str(),&error)!=0 && error==EVRInitError_VRInitError_None;
+        if(!ready)
+            std::fprintf(stderr,"[vr-tutorial] No shared OpenVR model interface: %d; using Touch Plus fallback\n",int(error));
+        // SteamVR's OpenXR runtime may own vrclient through a private interface,
+        // even when this DLL reports NotInitialized. Never call VR_InitInternal
+        // or VR_ShutdownInternal from optional model loading: that can replace
+        // the scene client's input/focus. OpenXR remains the only session owner.
+        return ready;
+    });
+    if(!connected) return false;
     auto* system=reinterpret_cast<VR_IVRSystem_FnTable*>(getInterface(systemName.c_str(),&error));
     if(!system || error!=EVRInitError_VRInitError_None) return false;
     auto* render=reinterpret_cast<VR_IVRRenderModels_FnTable*>(getInterface(renderName.c_str(),&error));
@@ -143,17 +142,14 @@ void EnsureTutorialControllerModels(bool steamvr) {
     static bool fallbackPublished=false;
     static double lastUpdate=-1;
     if(!fallbackPublished) fallbackPublished=PublishFallbackTutorialControllers();
-#if defined(__ANDROID__)
-    PublishQuestControllers();
-#endif
-#if defined(_WIN32)
-    if(steamvr && lastUpdate!=ImGui::GetTime()) {
+    if(lastUpdate!=ImGui::GetTime()) {
         lastUpdate=ImGui::GetTime();
-        PublishSteamVrTutorialControllers();
-    }
-#else
-    (void)steamvr;
+#if defined(_WIN32)
+        if(steamvr && PublishSteamVrTutorialControllers()) return;
 #endif
+        PublishQuestControllers();
+    }
+    (void)steamvr;
 }
 }
 
@@ -239,7 +235,7 @@ void UpdateIntroduction() {
         mkw::vr::MkwVRPolicySetSettingsVisible(mkw::vr::OpenXRSettingsPanelOpen());
         return;
     }
-    EnsureTutorialControllerModels(true);
+    EnsureTutorialControllerModels(mkw::vr::OpenXRReadPortControls().steamvr);
     const bool handCalibration=mkw::vr::OpenXRReadBodyHandCalibration().active;
     const auto settingsPolicy=mkw::vr::MkwVRPolicyGetSnapshot();
     const bool settingsRace=settingsPolicy.scene.mode==mkw::vr::VRSceneMode::Race &&

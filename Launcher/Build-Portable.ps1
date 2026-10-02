@@ -33,8 +33,8 @@ WiiCompiled VR - complete portable package
 3. Run Launch-WiiCompiled-VR.cmd or WheelWizard/WheelWizard.exe. Choose Mario
    Kart Wii VR or Retro Rewind VR. Use the launcher for updates, licenses and
    multiplayer features. Retro WFC availability depends on its online service.
-4. SteamVR is selected by default when installed. Launch SteamVR before playing.
-   F10 -> Use SteamVR (next launch) can disable this preference.
+4. Connect the headset using your active OpenXR runtime (SteamVR, VDXR, etc.).
+   F10 -> Use SteamVR (next launch) can explicitly select SteamVR instead.
 
 The Install and UserData folders remain beside the launcher. Move the whole
 package together. Your save and ROM remain on your PC.

@@ -1990,16 +1990,13 @@ gfx::StereoReplayFrame interpolated_stereo_frame(const AuroraStereoFrame& input,
   weight = retained.continuous
                ? stereo::interpolation_weight(input.displayTimeNanos, retained.boundary, retained.interval)
                : 1.0f;
-  auto anchor = retained.anchor;
-  if (weight < 1.0f && anchor.active && retained.previousAnchor.active) {
-    Mat3x4<float> previous, current, result;
-    std::memcpy(&previous, retained.previousAnchor.anchorFromScene.data(), sizeof(previous));
-    std::memcpy(&current, anchor.anchorFromScene.data(), sizeof(current));
-    if (gx::interpolate_transform(previous, current, weight, result)) {
-      std::memcpy(anchor.anchorFromScene.data(), &result, sizeof(result));
-    }
+  auto replay = make_stereo_replay_frame(input, retained.anchor);
+  if (retained.continuous && retained.anchor.active && retained.previousAnchor.active) {
+    replay.interpolateInAnchor = true;
+    std::memcpy(&replay.previousAnchor, retained.previousAnchor.anchorFromScene.data(), sizeof(replay.previousAnchor));
+    std::memcpy(&replay.currentAnchor, retained.anchor.anchorFromScene.data(), sizeof(replay.currentAnchor));
   }
-  return make_stereo_replay_frame(input, anchor);
+  return replay;
 }
 
 void run_retained_stereo_frame(gfx::SealedFrame& sealedFrame) noexcept {
@@ -2110,7 +2107,8 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx, u
   // gx::begin_frame_interpolation(), which resets both of these.
   ctx.interpolatedFrameCount = gx::interpolated_frame_count();
   ctx.interpolationActive = ctx.interpolatedFrameCount != 0;
-  ctx.replayInterpolatedFrames = ctx.interpolationActive && gx::frame_interpolation_replay_safe();
+  ctx.replayInterpolatedFrames = ctx.interpolationActive && gx::frame_interpolation_replay_safe() &&
+                                (!stereo_frame_provider_active() || sceneAnchor.active);
   ctx.scheduleBaseNanos = g_presentScheduleBaseNanos.load(std::memory_order_acquire);
   ctx.scheduleIntervalNanos = g_presentScheduleIntervalNanos.load(std::memory_order_acquire);
   const auto windowSize = window::get_window_size();

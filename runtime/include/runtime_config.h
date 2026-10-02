@@ -37,11 +37,10 @@
 #endif
 
 struct RuntimeUserConfig {
-#if defined(__ANDROID__)
     static constexpr bool kDefaultForceSteamVr = false;
+#if defined(__ANDROID__)
     static constexpr int kDefaultMenuShaderQuality = 1;
 #else
-    static constexpr bool kDefaultForceSteamVr = true;
     static constexpr int kDefaultMenuShaderQuality = 3;
 #endif
     bool vrWelcomeComplete = false;

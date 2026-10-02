@@ -57,11 +57,17 @@ only `wii_continuous_scan_opt_in = true`, set by the checkbox at the top of F10
 or the Wii Remotes menu, enables continuous Bluetooth scanning. Already-connected
 Wii Remotes remain usable. USB wheel discovery keeps the existing hotplug path.
 
-`[vr] force_steamvr = true` defaults on. On Windows the game selects an installed
-SteamVR manifest through `XR_RUNTIME_JSON` for its own process, including Steam
-library folders. It does not rewrite the system's active runtime. Disable **Use
-SteamVR (next launch)** to use another runtime. If SteamVR is not installed, a
-diagnostic is written and the available runtime is retained.
+`[vr] force_steamvr = false` is the default: the game uses the active OpenXR
+runtime. Enable **Use SteamVR (next launch)** to select an installed SteamVR
+manifest through `XR_RUNTIME_JSON` for this process, including Steam library
+folders. This does not rewrite the system's active runtime. Existing explicit
+SteamVR preferences remain effective. If SteamVR is not installed, a diagnostic
+is written and the available runtime is retained.
+
+SteamVR controller models take priority when that runtime is in use. The
+textured, animated Touch Plus models from the Quest version are the fallback
+on other runtimes or when native model loading fails. Optional model loading
+never initializes OpenVR on VDXR and never repeatedly retries a failed client.
 
 ## Wheel Wizard and portable bundle
 

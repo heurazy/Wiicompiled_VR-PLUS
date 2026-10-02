@@ -436,6 +436,14 @@ try {
                     Copy-Item -LiteralPath $directory -Destination (Join-Path $Destination $name) -Recurse
                 }
             }
+            $controllerResources = Join-Path $build 'resources\quest_touch_plus'
+            if (Test-Path -LiteralPath $controllerResources -PathType Container) {
+                $controllerDestination = Join-Path $Destination 'resources\quest_touch_plus'
+                [IO.Directory]::CreateDirectory($controllerDestination) | Out-Null
+                foreach ($name in @('left.wccontroller','right.wccontroller','left.rgba','right.rgba','LICENSE.md','SOURCE.md')) {
+                    Copy-Item -LiteralPath (Join-Path $controllerResources $name) -Destination (Join-Path $controllerDestination $name) -Force
+                }
+            }
             $isRetro = $ProvenanceProfile -eq 'retro-rewind'
             $provenance = [ordered]@{
                 SchemaVersion = 1

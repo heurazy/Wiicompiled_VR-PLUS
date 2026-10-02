@@ -65,7 +65,8 @@ int main() {
     const auto stick=Parse("[vr]\nstick_deadzone = 0.2\nstick_outer = 0.8\nstick_center_x = 0.1\n");
     Require(stick.vrStickCalibration.deadzone == 0.2f && stick.vrStickCalibration.outer == 0.8f);
     Require(stick.vrStickCalibration.center_x == 0.1f);
-    Require(Parse("[vr]\n").vrForceSteamVr);
+    Require(!Parse("[vr]\n").vrForceSteamVr);
+    Require(Parse("[vr]\nforce_steamvr = true\n").vrForceSteamVr);
     Require(!Parse("[vr]\nforce_steamvr = false\n").vrForceSteamVr);
     return 0;
 }

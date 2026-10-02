@@ -10,6 +10,7 @@
 #include "../gx/pipeline.hpp"
 #include "pipeline_cache.hpp"
 #include "stereo_replay.hpp"
+#include "anchored_interpolation.hpp"
 #include "cockpit.hpp"
 #include "window_mask.hpp"
 #include "tex_copy_conv.hpp"
@@ -1382,7 +1383,7 @@ static stereo_replay::HudScreen stereo_hud_screen() noexcept {
 static void write_stereo_uniform(std::span<uint8_t> uniform, const gx::UniformReplayLayout& layout,
                                  const StereoReplayEye& eye, const Mat4x4<float>& gameProjection,
                                  const Viewport& drawViewport, ClipRect displayRegion,
-                                 const stereo_replay::HudScreen& hudScreen) noexcept {
+                                 const stereo_replay::HudScreen& hudScreen, bool positionsAnchored = false) noexcept {
   if (layout.perspective) {
     // A projection that flips X (mirror mode) keeps its flip: the eye frustum
     // replaces the X scale's magnitude, and the reflection moves onto the eye
@@ -1393,7 +1394,9 @@ static void write_stereo_uniform(std::span<uint8_t> uniform, const gx::UniformRe
     if (mirrored) {
       projection = stereo_replay::mirror_projection_x(projection);
     }
-    const auto& viewFromScene = mirrored ? eye.viewFromSceneMirrored : eye.viewFromScene;
+    const auto viewFromScene = positionsAnchored
+        ? (mirrored ? stereo_replay::mirror_view_delta_x(eye.viewFromCenter) : eye.viewFromCenter)
+        : (mirrored ? eye.viewFromSceneMirrored : eye.viewFromScene);
     std::memcpy(uniform.data() + layout.projectionOffset, &projection, sizeof(projection));
 
     for (uint32_t matrix = 0; matrix < layout.positionMatrixCount; ++matrix) {
@@ -2163,9 +2166,10 @@ bool prepare_late_stereo_replay(SealedFrame& frame, wgpu::CommandEncoder& cmd, c
     std::span<uint8_t> uniform{bytes + saved.eyes[0].offset - data.uploadOffset, saved.current.size};
     std::memcpy(uniform.data(), data.sources.data() + saved.current.offset, uniform.size());
     const auto& layout = saved.layout;
-    if (layout.perspective && saved.previous.size == saved.current.size && weight < 1.0f) {
-      const auto* previous = data.sources.data() + saved.previous.offset;
-      const auto interpolateMatrices = [&](uint32_t offset, uint32_t count, uint32_t mask) {
+    const bool hasPrevious = saved.previous.size == saved.current.size;
+    if (layout.perspective && ((hasPrevious && weight < 1.0f) || stereoFrame.interpolateInAnchor)) {
+      const auto* previous = data.sources.data() + (hasPrevious ? saved.previous.offset : saved.current.offset);
+      const auto interpolateMatrices = [&](uint32_t offset, uint32_t count, uint32_t mask, bool normal) {
         for (uint32_t matrix = 0; matrix < count; ++matrix) {
           if ((mask & (1u << matrix)) == 0)
             continue;
@@ -2173,21 +2177,31 @@ bool prepare_late_stereo_replay(SealedFrame& frame, wgpu::CommandEncoder& cmd, c
           Mat3x4<float> before, current, result;
           std::memcpy(&before, previous + at, sizeof(before));
           std::memcpy(&current, uniform.data() + at, sizeof(current));
-          const bool valid = layout.indexedMatrices ? gx::interpolate_indexed_transform(before, current, weight, result)
-                                                    : gx::interpolate_transform(before, current, weight, result);
+          const auto interpolate = [&](const auto& a, const auto& b, float t, auto& out) {
+            return layout.indexedMatrices ? gx::interpolate_indexed_transform(a, b, t, out)
+                                          : gx::interpolate_transform(a, b, t, out);
+          };
+          bool valid = true;
+          if (stereoFrame.interpolateInAnchor) {
+            result = stereo_replay::interpolate_anchored_transform(before, current,
+                stereoFrame.previousAnchor, stereoFrame.currentAnchor,
+                hasPrevious ? weight : 1.f, normal, interpolate);
+          } else {
+            valid = interpolate(before, current, weight, result);
+          }
           if (valid)
             std::memcpy(uniform.data() + at, &result, sizeof(result));
         }
       };
-      interpolateMatrices(layout.positionOffset, layout.positionMatrixCount, layout.positionMatrixMask);
-      interpolateMatrices(layout.normalOffset, layout.normalMatrixCount, layout.positionMatrixMask);
+      interpolateMatrices(layout.positionOffset, layout.positionMatrixCount, layout.positionMatrixMask, false);
+      interpolateMatrices(layout.normalOffset, layout.normalMatrixCount, layout.positionMatrixMask, true);
       // Interpolate the game depth mapping before applying the HMD frustum.
       for (size_t component = 0; component < 16; ++component) {
         const size_t at = layout.projectionOffset + component * sizeof(float);
         float before, current;
         std::memcpy(&before, previous + at, sizeof(float));
         std::memcpy(&current, uniform.data() + at, sizeof(float));
-        const float value = before + (current - before) * weight;
+        const float value = before + (current - before) * (hasPrevious ? weight : 1.f);
         std::memcpy(uniform.data() + at, &value, sizeof(float));
       }
     }
@@ -2198,7 +2212,8 @@ bool prepare_late_stereo_replay(SealedFrame& frame, wgpu::CommandEncoder& cmd, c
     }
     for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
       write_stereo_uniform({bytes + saved.eyes[eye].offset - data.uploadOffset, saved.current.size}, layout,
-                           stereoFrame.eyes[eye], projection, saved.viewport, saved.displayRegion, data.hudScreen);
+                           stereoFrame.eyes[eye], projection, saved.viewport, saved.displayRegion, data.hudScreen,
+                           stereoFrame.interpolateInAnchor);
     }
   }
   // Never interpolate in mapped upload memory: write-combined pages make CPU

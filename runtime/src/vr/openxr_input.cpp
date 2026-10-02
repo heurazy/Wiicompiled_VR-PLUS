@@ -863,7 +863,7 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
     } else port.pause=hands[0].menu;
     if(panel.withheld) {
         const auto rawX=port.raw_steering_x,rawY=port.raw_steering_y;
-        port=QuestInput{.active=true};port.raw_steering_x=rawX;port.raw_steering_y=rawY;
+        port=QuestInput{.steamvr=port.steamvr,.active=true};port.raw_steering_x=rawX;port.raw_steering_y=rawY;
     }
     OpenXRPublishPortControls(port);
     // While the panel has the controllers, the game sees them idle.

@@ -120,7 +120,7 @@ internal static class ProductInfo
 {
     public const string Id = "wiicompiled-openxr-vr";
     public const string Name = "WiiCompiled OpenXR VR";
-    public const string Version = "1.3.0";
+    public const string Version = "1.3.1";
 
     /// <summary>
     /// The setup executable is copied into the installation under this name. It is the launcher and

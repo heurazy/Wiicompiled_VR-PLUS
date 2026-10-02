@@ -9,8 +9,9 @@ https://github.com/immersive-web/webxr-input-profiles/tree/4484a05e30bcd43fe86bb
 
 The original GLBs are retained for reproducibility. `android/Convert-TouchPlus.py`
 exports textured triangles, nine animation endpoints and tutorial landmarks.
-Only the converted geometry, RGBA textures and attribution ship in the APK.
-The Android runtime animates them from its existing OpenXR button states, while
-Windows continues to use the controller models returned by SteamVR.
+Only the converted geometry, RGBA textures and attribution ship in the APK and
+desktop resources. Both builds animate them from the existing OpenXR button
+states. On Windows, SteamVR's own controller models take priority; Touch Plus
+is the fallback for other runtimes or unavailable SteamVR models.
 
 See `LICENSE.md` for the upstream asset license.

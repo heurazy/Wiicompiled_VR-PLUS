@@ -387,6 +387,11 @@ else()
     set(MKW_BUILD_TESTS_DEFAULT ON)
 endif()
 option(MKW_BUILD_TESTS "Build the runtime host-contract test executables" ${MKW_BUILD_TESTS_DEFAULT})
+option(MKW_BUILD_GX_TESTS "Build Aurora renderer regression tests alongside the runtime" OFF)
+if(MKW_BUILD_GX_TESTS AND NOT MKW_PLATFORM_ANDROID)
+    enable_testing()
+    add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../aurora-main/tests" aurora-tests)
+endif()
 unset(MKW_BUILD_TESTS_DEFAULT)
 if(MKW_BUILD_TESTS)
 enable_testing()
@@ -625,6 +630,22 @@ if(MKW_BUILD_PRODUCTS)
 
     set(MKW_RUNTIME_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}")
     include("${CMAKE_CURRENT_LIST_DIR}/cmake/PublicProducts.cmake")
+    # The same textured Touch Plus models used on Quest are the desktop
+    # fallback. Copy only redistributable converted assets, never game data.
+    if(NOT MKW_PLATFORM_ANDROID)
+        foreach(product IN ITEMS WiiCompiled RetroRewind)
+            if(TARGET ${product})
+                add_custom_command(TARGET ${product} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${product}>/resources/quest_touch_plus")
+                foreach(asset IN ITEMS left.wccontroller right.wccontroller left.rgba right.rgba LICENSE.md SOURCE.md)
+                    add_custom_command(TARGET ${product} POST_BUILD
+                        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${CMAKE_CURRENT_LIST_DIR}/assets/quest_touch_plus/${asset}"
+                        "$<TARGET_FILE_DIR:${product}>/resources/quest_touch_plus/${asset}")
+                endforeach()
+            endif()
+        endforeach()
+    endif()
 else()
     if(MKW_PLATFORM_MACOS)
         # Compile-only audit of native runtime sources. It deliberately avoids

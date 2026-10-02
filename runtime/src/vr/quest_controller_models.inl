@@ -11,8 +11,14 @@ bool PublishQuestControllers() {
     static bool attempted=false,ready=false;
     if(!attempted) {
         attempted=true;
+#if defined(__ANDROID__)
         const char* resources=std::getenv("MKW_ANDROID_RESOURCES_DIR");
         if(!resources) return false;
+#else
+        const char* base=SDL_GetBasePath();
+        if(!base) return false;
+        const std::string resources=std::string(base)+"resources";
+#endif
         ready=true;
         for(uint32_t hand=0;hand<2;++hand) {
             auto& asset=g_questControllerAssets[hand];

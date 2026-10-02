@@ -321,6 +321,11 @@ struct StereoReplayEye {
 
 struct StereoReplayFrame {
   std::array<StereoReplayEye, AURORA_STEREO_EYE_COUNT> eyes;
+  // Interpolate in the seated frame, not in two different recorded cameras.
+  // A kart rigidly attached to the seat must stay rigid between guest frames.
+  bool interpolateInAnchor = false;
+  Mat3x4<float> previousAnchor{};
+  Mat3x4<float> currentAnchor{};
   // VR hands and synthetic wheel, drawn per eye after the world (gfx/cockpit.hpp).
   AuroraCockpit cockpit{};
   // The immersive window (AuroraStereoFrame::window): each eye is masked to the

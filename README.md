@@ -86,9 +86,10 @@ upgrade behavior and the remaining hardware validation.
 ## Requirements
 
 - Windows 10 or 11, 64-bit.
-- SteamVR installed and running. The VR executable selects SteamVR's OpenXR runtime for its process;
-  start SteamVR and connect the headset before launching the game.
-- A D3D12-capable GPU and a driver accepted by SteamVR, OpenXR, and Dawn. GTX 1650 / RX 6400 /
+- An installed, active OpenXR runtime with the headset connected. The game uses your active runtime
+  by default, including SteamVR or Virtual Desktop's VDXR. F10 → Use SteamVR (next launch)
+  can explicitly select SteamVR for the game without changing the system's active runtime.
+- A D3D12-capable GPU and a driver accepted by your OpenXR runtime and Dawn. GTX 1650 / RX 6400 /
   Arc A310 or better is a practical starting point.
 - About 20 GB free while installing and compiling. The compiled game is about 5 GB, excluding
   optional Retro Rewind files.
@@ -100,7 +101,7 @@ upgrade behavior and the remaining hardware validation.
 ### Guided installer
 
 1. Download the Windows setup asset from this fork's [release page](https://github.com/heurazy/Wiicompiled_VR-PLUS/releases).
-2. Start SteamVR, then run the installer.
+2. Connect your headset through your OpenXR runtime, then run the installer.
 3. Select your clean PAL `RMCP01` image and choose an installation folder.
 4. Leave **Download and install Retro Rewind automatically** enabled if you want both games.
 5. Select **Install**. The setup translates and compiles the game on this PC; the image never leaves
@@ -240,7 +241,7 @@ races still depend on Retro WFC service availability, compatible game versions a
 
 ## Troubleshooting
 
-- **The headset stays on the desktop mirror:** start SteamVR first, check that it is the active
+- **The headset stays on the desktop mirror:** connect the headset, check your active
   OpenXR runtime, and restart the game. `required = false` falls back to desktop mode when OpenXR
   cannot create a session.
 - **The game is not visible in WheelWizard:** run the copied setup from the installation folder,
@@ -275,7 +276,8 @@ and validation notes.
 
 - **[WebXR Input Profiles](https://github.com/immersive-web/webxr-input-profiles)** for the
   textured Touch Plus controller meshes and button animation transforms used by the Quest
-  standalone version. See [asset provenance and MIT license](runtime/assets/quest_touch_plus/SOURCE.md).
+  standalone version and desktop fallback. SteamVR's device models take priority when available.
+  See [asset provenance and MIT license](runtime/assets/quest_touch_plus/SOURCE.md).
 - **[Wiicompiled VR](https://github.com/iChris4/Wiicompiled_VR)** by **[iChris4](https://github.com/iChris4)**: 
   This project originated as a fork of iChris4's pioneering OpenXR VR port of WiiCompiled. 
   The core OpenXR integration, stereo rendering pipeline, and initial VR translation hooks 

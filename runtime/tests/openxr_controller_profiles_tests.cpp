@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "vr/openxr_controller_profiles.h"
+#include "vr/controller_model_connection.h"
 
 #include <iostream>
 #include <string_view>
@@ -43,6 +44,22 @@ size_t ActionCount(const mkw::vr::OpenXRControllerActionPaths& actions) {
 
 int main() {
     using namespace mkw::vr;
+
+    // Reproduce the issue's thousands of model-load failures on VDXR without
+    // requiring a headset: neither the OpenVR query nor init may be called.
+    ControllerModelConnection models;
+    int queries=0;
+    const auto absent=[&] { ++queries; return false; };
+    for(int frame=0;frame<10000;++frame) models.Connect(false,absent);
+    Check(queries==0,"VDXR never accesses an OpenVR model client");
+    for(int frame=0;frame<10000;++frame) models.Connect(true,absent);
+    Check(queries==1,"an unavailable model client is not queried per frame");
+
+    ControllerModelConnection shared;
+    queries=0;
+    for(int frame=0;frame<10000;++frame)
+        Check(shared.Connect(true,[&] { ++queries; return true; }),"an existing client is reused");
+    Check(queries==1,"model loading connects to an existing scene client only once");
 
     Check(kOpenXRControllerProfiles.size() >= 12,
           "the compatibility table covers more than the original three profiles");
