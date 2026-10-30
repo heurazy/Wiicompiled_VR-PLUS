@@ -285,7 +285,11 @@ bool OpenXRInput::Create(OpenXRRuntime& runtime) {
 
 bool OpenXRInput::CreateActions() {
     XrActionSetCreateInfo set_info{XR_TYPE_ACTION_SET_CREATE_INFO};
-    std::strncpy(set_info.actionSetName, "mkw_gameplay", XR_MAX_ACTION_SET_NAME_SIZE - 1);
+    // SteamVR persists bindings by action-set/action name. The old shared
+    // gameplay namespace predates the port's left-hand options actions and can
+    // retain an incomplete mapping after upgrading. Use a stable, versioned
+    // port namespace so this layout gets its complete suggested bindings.
+    std::strncpy(set_info.actionSetName, "mkw_vr_controls_v2", XR_MAX_ACTION_SET_NAME_SIZE - 1);
     std::strncpy(set_info.localizedActionSetName, "Gameplay", XR_MAX_LOCALIZED_ACTION_SET_NAME_SIZE - 1);
     set_info.priority = 0;
     if (!Check(xrCreateActionSet(m_runtime->Instance(), &set_info, &m_action_set), "xrCreateActionSet")) {
@@ -375,6 +379,7 @@ bool OpenXRInput::SuggestBindings() {
             return false;
         }
         accepted=true;
+        Log(OpenXRLogLevel::Info, std::string("OpenXR controller bindings accepted: ") + profile);
         return true;
     };
 
@@ -676,6 +681,32 @@ void OpenXRInput::Sync(XrTime predicted_display_time, const OpenXRPointerScreen&
         }
         Idle();
         return;
+    }
+
+    // Report transitions only, including a successful sync with no bound
+    // controllers. A loaded session/action set alone does not prove input works.
+    for (uint32_t hand = 0; hand < kHands; ++hand) {
+        XrInteractionProfileState profile{XR_TYPE_INTERACTION_PROFILE_STATE};
+        XrActionStateGetInfo info{XR_TYPE_ACTION_STATE_GET_INFO};
+        info.action = m_grip_pose;
+        info.subactionPath = m_hand_paths[hand];
+        XrActionStatePose pose{XR_TYPE_ACTION_STATE_POSE};
+        const bool active = XR_SUCCEEDED(xrGetActionStatePose(m_runtime->Session(), &info, &pose)) &&
+                            pose.isActive == XR_TRUE;
+        if (XR_SUCCEEDED(xrGetCurrentInteractionProfile(m_runtime->Session(), m_hand_paths[hand], &profile)) &&
+            (!m_input_status_logged[hand] || profile.interactionProfile != m_input_profiles[hand] ||
+             active != m_input_pose_active[hand])) {
+            std::array<char, XR_MAX_PATH_LENGTH> path{};
+            uint32_t length = 0;
+            if (profile.interactionProfile != XR_NULL_PATH)
+                xrPathToString(m_runtime->Instance(), profile.interactionProfile, path.size(), &length, path.data());
+            Log(OpenXRLogLevel::Info, std::string("OpenXR ") + (hand == 0 ? "left" : "right") +
+                " controller: profile=" + (path[0] ? path.data() : "unbound") +
+                ", pose-active=" + (active ? "true" : "false"));
+            m_input_status_logged[hand] = true;
+            m_input_profiles[hand] = profile.interactionProfile;
+            m_input_pose_active[hand] = active;
+        }
     }
 
     const auto boolean = [&](XrAction action, uint32_t hand) {

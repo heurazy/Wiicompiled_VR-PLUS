@@ -165,6 +165,9 @@ private:
     XrPath m_hand_paths[kHands]{};
     XrSpace m_aim_spaces[kHands]{};
     XrSpace m_grip_spaces[kHands]{};
+    XrPath m_input_profiles[kHands]{};
+    bool m_input_pose_active[kHands]{};
+    bool m_input_status_logged[kHands]{};
     // xrConvertWin32PerformanceCounterToTimeKHR / xrConvertTimespecTimeToTimeKHR,
     // when the runtime offers them; the input time falls back to display time.
     PFN_xrVoidFunction m_convert_now_to_xr_time = nullptr;

@@ -27,6 +27,11 @@ thread_local ImGuiContext* AuroraImGuiContext = nullptr;
 
 namespace aurora::imgui {
 static ImGuiContext* g_rendererContext = nullptr;
+// The headset panel has a different canvas and can be rendered while desktop
+// passes are still queued. Each backend needs its own projection uniform and
+// vertex/index ring: sharing the desktop backend lets a later UI pass rewrite
+// resources referenced by the panel.
+static ImGuiContext* g_panelRendererContext = nullptr;
 
 struct RendererContextScope {
   ImGuiContext* previous = ImGui::GetCurrentContext();
@@ -89,6 +94,9 @@ void initialize() noexcept {
     // frames of renderer resources to stop them overwriting each other's vertex/index buffers.
     info.NumFramesInFlight = 12;
     ImGui_ImplWGPU_Init(&info);
+    g_panelRendererContext = ImGui::CreateContext(ImGui::GetIO().Fonts);
+    ImGui_ImplWGPU_Init(&info);
+    ImGui::SetCurrentContext(g_rendererContext);
   }
 }
 
@@ -97,6 +105,13 @@ void shutdown() noexcept {
   if (g_useSdlRenderer) {
     ImGui_ImplSDLRenderer3_Shutdown();
   } else {
+    if (g_panelRendererContext != nullptr) {
+      ImGui::SetCurrentContext(g_panelRendererContext);
+      ImGui_ImplWGPU_Shutdown();
+      ImGui::DestroyContext(g_panelRendererContext);
+      g_panelRendererContext = nullptr;
+      ImGui::SetCurrentContext(g_rendererContext);
+    }
     ImGui_ImplWGPU_Shutdown();
   }
   ImGui_ImplSDL3_Shutdown();
@@ -305,9 +320,11 @@ bool render_draw_data(const wgpu::RenderPassEncoder& pass, ImDrawData* data) noe
   ZoneScoped;
   RendererContextScope context;
   // The SDL renderer fallback has no render passes to draw into.
-  if (g_useSdlRenderer || data == nullptr || ImGui::GetCurrentContext() == nullptr) {
+  if (g_useSdlRenderer || data == nullptr || g_panelRendererContext == nullptr) {
     return false;
   }
+  ImGui::SetCurrentContext(g_panelRendererContext);
+  ImGui_ImplWGPU_NewFrame();
   pass.PushDebugGroup("Aurora: Dear Imgui headset panel");
   ImGui_ImplWGPU_RenderDrawData(data, pass.Get());
   pass.PopDebugGroup();
