@@ -1,0 +1,1822 @@
+diff --git a/Launcher/NativeBuildFlags.ps1 b/Launcher/NativeBuildFlags.ps1
+index 7ebf55b..45deaa4 100644
+--- a/Launcher/NativeBuildFlags.ps1
++++ b/Launcher/NativeBuildFlags.ps1
+@@ -300,8 +300,12 @@ function Get-MkwNativeConfigureArguments {
+         }
+     }
+ 
++    # Clear any prebuilt package cached by an earlier configure when its source
++    # fingerprint no longer matches. Otherwise CMake silently links stale Aurora.
+     if (-not [string]::IsNullOrWhiteSpace($NativePrebuiltDirectory)) {
+         $arguments += "-DMKW_NATIVE_PREBUILT_DIR=$(ConvertTo-MkwCMakePath $NativePrebuiltDirectory)"
++    } else {
++        $arguments += '-DMKW_NATIVE_PREBUILT_DIR='
+     }
+ 
+     $arguments += $AdditionalArguments
+diff --git a/README.md b/README.md
+index 2a438d9..def2d2e 100644
+--- a/README.md
++++ b/README.md
+@@ -19,7 +19,7 @@ clean PAL `RMCP01` disc image and compile the game locally.
+ - VR course object culling based on the player's view rather than the kart's direction: implemented in source; headset verification pending.
+ - better motorcycle controls : planned
+ - more vehicles visual steering wheel compatibility : planned
+-- fix Bullet Bill gate vision : planned
++- Bullet Bill temporarily uses the game's original camera, then restores the selected VR camera.
+ - option to move with the kart : planned
+ - more control options : planned
+ - throwing shells and other items option : planned
+@@ -162,11 +162,18 @@ when the animation ends or is skipped.
+ The original and diorama cameras show the race HUD, minimap, and item roulette on a panel that can
+ follow the left hand. First person anchors the same HUD in front of the seat. **VR settings >
+ Display** controls panel distance and width; **Camera** controls seat trim and world scale.
+-
+-The physical wheel and camera are stabilised during impacts, spins, airborne tricks, and Lightning
+-scale changes. This keeps the view and hand controls attached to the kart without making the world
+-rotate with a damage animation. **Show control tutorials again** resets the first-race and
+-first-person guides.
++During a Bullet Bill transformation, the view temporarily switches to the game's original camera
++so the Bullet Bill model does not block vision; it restores the chosen camera when the item ends.
++
++The first-person camera follows the kart in **Safe: large slopes only** mode by default. It ignores small bumps and brief slopes,
++then gradually follows sustained steep pitch and bank with a limited angle and turning speed.
++Use **VR settings > Cameras > Follow kart motion in first person** to turn this off or choose another detail level:
++**Tilt only** follows every track pitch and bank, **Tilt + side-to-side** also moves with the
++seat's lateral sway, and **All motion** follows the complete vehicle animation, including item
++hits, banana spins and tricks. Safe and the other comfort modes exclude damage and trick spins.
++These settings apply immediately and are saved as
++`first_person_follow_vehicle_motion` and `first_person_motion_level` in `Config.toml`.
++**Show control tutorials again** resets the first-race and first-person guides.
+ 
+ ## VR settings
+ 
+@@ -174,8 +181,8 @@ Open VR settings with **X + Y** in the headset or **F10** on the desktop mirror.
+ 
+ - **Graphics:** per-eye resolution, sharp rendering, preferred headset refresh rate, FPS display,
+   adaptive resolution, and menu shader quality (`Off`, `Low`, `Balanced`, `High`).
+-- **Camera and Display:** default camera, first-person head offsets, world scale, HUD width and
+-  distance, and seat reset.
++- **Camera and Display:** default camera, first-person head offsets, optional kart motion follow,
++  world scale, HUD width and distance, and seat reset.
+ - **Driving:** native steering-wheel animation, kart and motorcycle steering range, acquisition
+   depth, grab assistance, smoothing, tracking-loss tolerance, and haptics.
+ - **Input:** controller profile diagnostics and stick deadzone calibration.
+diff --git a/aurora-main/include/aurora/aurora.h b/aurora-main/include/aurora/aurora.h
+index 747116b..4a237f4 100644
+--- a/aurora-main/include/aurora/aurora.h
++++ b/aurora-main/include/aurora/aurora.h
+@@ -181,6 +181,11 @@ typedef enum {
+     // Internal raster scale, independent of the runtime swapchain size. Zero = 1.
+     float renderScale;
+ } AuroraStereoFrame;
++// Re-render a room-anchored VR menu at the headset refresh rate using the
++// latest completed game image. The game/VI frame rate remains unchanged.
++// Returns false when no matching completed image is available yet.
++bool aurora_refresh_vr_menu(const AuroraStereoFrame* frame);
++bool aurora_can_refresh_vr_menu(uint64_t contentTag);
+   typedef struct { float position[3], color[3], uv[2]; uint32_t material; } AuroraVRControllerVertex;
+   void aurora_set_vr_ui_pointer(float x,float y,bool active,bool down);
+ void aurora_set_vr_controller_model(uint32_t hand, const AuroraVRControllerVertex* triangles, uint32_t count);
+diff --git a/aurora-main/include/aurora/gfx.h b/aurora-main/include/aurora/gfx.h
+index 070dd2f..b756ed4 100644
+--- a/aurora-main/include/aurora/gfx.h
++++ b/aurora-main/include/aurora/gfx.h
+@@ -104,6 +104,11 @@ bool aurora_get_stereo_skip_copy_clears();
+ // Also live; a cleared flag or a non-positive size leaves 2D content on its
+ // recorded GX transforms.
+ void aurora_set_stereo_hud_screen(bool enabled, float width, float distance);
++// Tags the currently drawn game UI control as a world-depth name balloon.
++// Zero restores the ordinary HUD plane. The value is in scene units.
++void aurora_set_stereo_hud_world_depth(float distance);
++// Original screen-space center of the name balloon, in game UI coordinates.
++void aurora_set_stereo_hud_world_anchor(float x, float y);
+ bool aurora_get_stereo_hud_screen_enabled();
+ 
+ // Guest-RAM write tracking. `generation` changes whenever guest RAM covering a host range was
+diff --git a/aurora-main/lib/aurora.cpp b/aurora-main/lib/aurora.cpp
+index c9367de..11629d3 100644
+--- a/aurora-main/lib/aurora.cpp
++++ b/aurora-main/lib/aurora.cpp
+@@ -43,6 +43,7 @@
+ #include <mutex>
+ #include <optional>
+ #include <string>
++#include <string_view>
+ #include <thread>
+ #include <vector>
+ 
+@@ -545,6 +546,12 @@ std::array<StereoEyeTarget, AURORA_STEREO_EYE_COUNT> g_stereoEyeTargets;
+ std::array<webgpu::TextureWithSampler,AURORA_STEREO_EYE_COUNT> g_stereoUpscaled;
+ std::array<wgpu::BindGroup,AURORA_STEREO_EYE_COUNT> g_stereoUpscaleBindings;
+ std::array<std::array<uint32_t,2>,AURORA_STEREO_EYE_COUNT> g_stereoOutputSizes{};
++// The last completed mono menu image is a GPU source for refresh-only XR
++// frames. Encoding and refresh share this mutex even when the regular frame
++// worker overlaps the next guest frame's GX recording.
++std::mutex g_vrMenuRefreshMutex;
++webgpu::PresentSource g_vrMenuSource{};
++uint64_t g_vrMenuSourceTag = AURORA_STEREO_CONTENT_TAG_UNKNOWN;
+ 
+ void ensure_stereo_eye_target(uint32_t eyeIndex, uint32_t width, uint32_t height) {
+   auto& target = g_stereoEyeTargets[eyeIndex];
+@@ -1518,6 +1525,7 @@ void shutdown() noexcept {
+   stop_frame_worker();
+ #ifdef AURORA_ENABLE_GX
+   stop_presenter();
++  { std::lock_guard lock(g_vrMenuRefreshMutex); g_vrMenuSource = {}; g_vrMenuSourceTag = AURORA_STEREO_CONTENT_TAG_UNKNOWN; }
+   g_stereoEyeTargets = {};
+   g_stereoUpscaleBindings={};g_stereoUpscaled={};g_stereoOutputSizes={};
+   g_presentationImagePools = {};
+@@ -1641,6 +1649,7 @@ struct SealedFrameContext {
+   uint32_t snapshotWidth = 1;
+   uint32_t snapshotHeight = 1;
+   uint32_t logicalFrame = 0;
++  uint64_t contentTag = AURORA_STEREO_CONTENT_TAG_UNKNOWN;
+   bool interpolationActive = false;
+   bool replayInterpolatedFrames = false;
+ };
+@@ -1660,6 +1669,7 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx, u
+   // current_frame() advances inside gfx::end_frame; unsigned wrap maps the
+   // pre-first-frame UINT32_MAX value to logical frame zero.
+   ctx.logicalFrame = gfx::current_frame() + 1;
++  ctx.contentTag = contentTag;
+   if (const auto stereoInput = request_stereo_frame(ctx.logicalFrame, contentTag)) {
+     ctx.uiFrame=*stereoInput;
+     { std::lock_guard lock(vrui::mutex);ctx.uiGuide=vrui::guide; }
+@@ -1717,6 +1727,7 @@ void seal_frame_locked(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx, u
+ // without the renderer GPU mutex while the producer records the next frame.
+ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame, SealedFrameContext& ctx) {
+   ZoneScopedN("Encode sealed frame");
++  std::lock_guard menuLock(g_vrMenuRefreshMutex);
+   const auto encodeStart = PresentClock::now();
+   const auto elapsedMs = [](auto start) { return std::chrono::duration<double, std::milli>(PresentClock::now() - start).count(); };
+   auto encoder = std::move(ctx.encoder);
+@@ -1807,6 +1818,11 @@ std::vector<PresentationJob> encode_sealed_frame(gfx::SealedFrame& sealedFrame,
+   }
+   auto finalImage = acquire_presentation_image(ctx.interpolatedFrameCount, ctx.snapshotWidth, ctx.snapshotHeight);
+   encode_presentation_snapshot(encoder, ctx.presentSource, *finalImage, true);
++  g_vrMenuSource = {.bindGroup = finalImage->bindGroup,
++                    .texture = finalImage->texture.texture,
++                    .size = finalImage->texture.size,
++                    .format = finalImage->texture.format};
++  g_vrMenuSourceTag = ctx.contentTag;
+ 
+   // Exercise the actual VR environment pipeline without requiring an HMD.
+   // Paired with MKW_VR_INTRO_PREVIEW, this also enables GPU validation locally.
+@@ -2272,6 +2288,46 @@ void set_stereo_scene_anchor(const float anchorFromScene[12]) noexcept {
+ }
+ 
+ #ifdef AURORA_ENABLE_GX
++bool can_refresh_vr_menu(uint64_t contentTag) noexcept {
++  std::lock_guard lock(g_vrMenuRefreshMutex);
++  return contentTag != AURORA_STEREO_CONTENT_TAG_UNKNOWN &&
++         contentTag == g_vrMenuSourceTag && static_cast<bool>(g_vrMenuSource.bindGroup);
++}
++
++bool refresh_vr_menu(const AuroraStereoFrame& frame) noexcept {
++  if (frame.mode != AURORA_STEREO_FRAME_VIRTUAL_SCREEN || !frame.ui.anchored || frame.frameToken == 0)
++    return false;
++  // The producer may be sealing the next menu frame while OpenXR asks for a
++  // fresh headset pose. Never read a half-updated source or resize an eye that
++  // the frame worker is still encoding.
++  std::lock_guard gpuLock(g_rendererGpuMutex);
++  std::lock_guard menuLock(g_vrMenuRefreshMutex);
++  if (frame.contentTag == AURORA_STEREO_CONTENT_TAG_UNKNOWN ||
++      frame.contentTag != g_vrMenuSourceTag || !g_vrMenuSource.bindGroup)
++    return false;
++
++  for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye) {
++    if (frame.eyes[eye].width == 0 || frame.eyes[eye].height == 0) return false;
++    ensure_stereo_eye_target(eye, frame.eyes[eye].width, frame.eyes[eye].height);
++    g_stereoOutputSizes[eye] = {frame.eyes[eye].width, frame.eyes[eye].height};
++  }
++  AuroraVRUiGuide layout{};
++  { std::lock_guard lock(vrui::mutex); layout = vrui::guide; }
++  const wgpu::CommandEncoderDescriptor descriptor{.label = "VR menu refresh"};
++  auto encoder = g_device.CreateCommandEncoder(&descriptor);
++  for (uint32_t eye = 0; eye < AURORA_STEREO_EYE_COUNT; ++eye)
++    vrui::render(encoder, g_vrMenuSource, frame, layout, eye);
++  const auto sink = run_stereo_sink(encoder, frame.frameToken, gfx::current_frame(), frame.mode);
++  if (!sink) return false;
++  const auto buffer = encoder.Finish();
++  {
++    std::lock_guard submitLock(g_queueSubmitMutex);
++    g_queue.Submit(1, &buffer);
++    if (sink->submitted) sink->submitted(sink->frame, sink->userdata);
++  }
++  return true;
++}
++
+ namespace stereo {
+ void set_sink(SinkCallback callback, SubmitCallback submitted, void* userdata) noexcept {
+   std::lock_guard lock(g_stereoRegistrationMutex);
+@@ -2294,9 +2350,26 @@ const AuroraEvent* aurora_update() { return aurora::update(); }
+ bool aurora_begin_frame() { return aurora::begin_frame(); }
+ void aurora_end_frame() { aurora::end_frame(AURORA_STEREO_CONTENT_TAG_UNKNOWN); }
+ void aurora_end_frame_tagged(uint64_t contentTag) { aurora::end_frame(contentTag); }
++bool aurora_can_refresh_vr_menu(uint64_t contentTag) {
++#ifdef AURORA_ENABLE_GX
++  return aurora::can_refresh_vr_menu(contentTag);
++#else
++  (void)contentTag;
++  return false;
++#endif
++}
++bool aurora_refresh_vr_menu(const AuroraStereoFrame* frame) {
++#ifdef AURORA_ENABLE_GX
++  return frame != nullptr && aurora::refresh_vr_menu(*frame);
++#else
++  (void)frame;
++  return false;
++#endif
++}
+ void aurora_set_stereo_scene_anchor(const float anchorFromScene[12]) {
+     aurora::set_stereo_scene_anchor(anchorFromScene);
+ }
++
+ void aurora_set_stereo_scene_anchor_scaled(const float anchorFromScene[12], float unitsPerMeter) {
+   aurora::set_stereo_scene_anchor(anchorFromScene);
+   uint32_t bits=0;std::memcpy(&bits,&unitsPerMeter,4);
+@@ -2482,6 +2555,29 @@ bool aurora_get_stereo_skip_copy_clears() { return aurora::gfx::get_stereo_skip_
+ void aurora_set_stereo_hud_screen(bool enabled, float width, float distance) {
+   aurora::gfx::set_stereo_hud_screen(enabled, width, distance);
+ }
++void aurora_set_stereo_hud_world_depth(float distance) {
++  distance = std::isfinite(distance) && distance > 0.f ? distance : 0.f;
++  if (aurora::gfx::get_stereo_hud_world_depth() == distance) {
++    return;
++  }
++  // GX commands are buffered: consume the previous control's draws with its
++  // original HUD placement before changing the metadata for the next control.
++  aurora::gx::fifo::drain();
++  aurora::gfx::set_stereo_hud_world_depth(distance);
++  aurora::gx::g_gxState.stateDirty = true;
++}
++void aurora_set_stereo_hud_world_anchor(float x, float y) {
++  x = std::isfinite(x) ? x : 0.f;
++  y = std::isfinite(y) ? y : 0.f;
++  const auto oldAnchor = aurora::gfx::get_stereo_hud_world_anchor();
++  if (oldAnchor.first == x && oldAnchor.second == y) {
++    return;
++  }
++  aurora::gx::fifo::drain();
++  aurora::gfx::set_stereo_hud_world_anchor(x, y);
++  // Identical GX material state must not merge two differently placed labels.
++  aurora::gx::g_gxState.stateDirty = true;
++}
+ bool aurora_get_stereo_hud_screen_enabled() { return aurora::gfx::get_stereo_hud_screen_enabled(); }
+ void aurora_set_background_input(bool value) {
+   aurora::g_config.allowJoystickBackgroundEvents = value;
+diff --git a/aurora-main/lib/gfx/common.cpp b/aurora-main/lib/gfx/common.cpp
+index c32a0c2..12e8d27 100644
+--- a/aurora-main/lib/gfx/common.cpp
++++ b/aurora-main/lib/gfx/common.cpp
+@@ -228,6 +228,9 @@ bool get_stereo_skip_copy_clears() noexcept { return g_stereoSkipCopyClears.load
+ static std::atomic_bool g_stereoHudScreenEnabled{false};
+ static std::atomic<float> g_stereoHudScreenWidth{0.f};
+ static std::atomic<float> g_stereoHudScreenDistance{0.f};
++static std::atomic<float> g_stereoHudWorldDepth{0.f};
++static std::atomic<float> g_stereoHudWorldAnchorX{0.f};
++static std::atomic<float> g_stereoHudWorldAnchorY{0.f};
+ 
+ void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept {
+   g_stereoHudScreenWidth.store(width, std::memory_order_relaxed);
+@@ -235,6 +238,21 @@ void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept {
+   g_stereoHudScreenEnabled.store(enabled, std::memory_order_relaxed);
+ }
+ bool get_stereo_hud_screen_enabled() noexcept { return g_stereoHudScreenEnabled.load(std::memory_order_relaxed); }
++void set_stereo_hud_world_depth(float distance) noexcept {
++  g_stereoHudWorldDepth.store(std::isfinite(distance) && distance > 0.f ? distance : 0.f,
++                              std::memory_order_relaxed);
++}
++float get_stereo_hud_world_depth() noexcept {
++  return g_stereoHudWorldDepth.load(std::memory_order_relaxed);
++}
++void set_stereo_hud_world_anchor(float x, float y) noexcept {
++  g_stereoHudWorldAnchorX.store(std::isfinite(x) ? x : 0.f, std::memory_order_relaxed);
++  g_stereoHudWorldAnchorY.store(std::isfinite(y) ? y : 0.f, std::memory_order_relaxed);
++}
++std::pair<float, float> get_stereo_hud_world_anchor() noexcept {
++  return {g_stereoHudWorldAnchorX.load(std::memory_order_relaxed),
++          g_stereoHudWorldAnchorY.load(std::memory_order_relaxed)};
++}
+ 
+ // Recycle command storage: discarding passes used to free their command lists too, so each frame
+ // rebuilt hundreds of KB from zero capacity. The passes themselves are cheap to recreate.
+@@ -1339,6 +1357,7 @@ static bool prepare_stereo_replay_uniforms(const StereoReplayFrame& stereoFrame)
+       .znear = 0.0f,
+       .zfar = 1.0f,
+   };
++  cockpit::SceneDepth activeWorldDepth{};
+   for (auto& pass : g_renderPasses) {
+     if (!pass.efbTarget) {
+       continue;
+@@ -1365,6 +1384,7 @@ static bool prepare_stereo_replay_uniforms(const StereoReplayFrame& stereoFrame)
+         const float low=std::clamp(std::min(drawViewport.znear,drawViewport.zfar),0.f,1.f);
+         const float high=std::clamp(std::max(drawViewport.znear,drawViewport.zfar),0.f,1.f);
+         pass.cockpitDepth={row[2]*(high-low)-low,row[3]*(high-low),true};
++        activeWorldDepth=pass.cockpitDepth;
+       }
+       // Only a genuinely affine projection carries its NDC position in its clip
+       // position, which is what the virtual screen reprojection consumes. GX
+@@ -1422,15 +1442,43 @@ static bool prepare_stereo_replay_uniforms(const StereoReplayFrame& stereoFrame)
+           // The tracked panel is 30 cm wide. Preserve the original HUD aspect,
+           // including its baked minimap, without applying the world camera anchor.
+           auto screen = hudScreen;
+-          if (eye.handHud) {
++          const bool worldNameBalloon = layout.worldHudDepth > 0.f && screen.valid();
++          if (worldNameBalloon) {
++            // MKW's name balloon is drawn with an orthographic UI projection,
++            // despite its position being calculated from a racer in the world.
++            // Keep its original angular layout, but put the plane at that
++            // racer's camera depth and let the eye/scene transform supply
++            // binocular parallax. Never send it to the left-hand HUD panel.
++            const float depth = std::clamp(layout.worldHudDepth, screen.distance * 0.5f,
++                                           screen.distance * 20.f);
++            const float scale = depth / screen.distance;
++            screen.halfWidth *= scale;
++            screen.halfHeight *= scale;
++            screen.distance = depth;
++          } else if (eye.handHud) {
+             screen.halfWidth = 0.15f;
+             screen.halfHeight = 0.15f * hudScreen.halfHeight / hudScreen.halfWidth;
+             screen.distance = 1.0f;
+           }
++          const stereo_replay::HudOverlayPlacement nameplatePlacement =
++              worldNameBalloon
++                  ? stereo_replay::HudOverlayPlacement{layout.worldHudAnchorX, layout.worldHudAnchorY,
++                                                       0.55f, 0.07f}
++                  : stereo_replay::HudOverlayPlacement{};
+           const auto projection = stereo_replay::compose_hud_screen_projection(
+-              eye.projection, eye.handHud ? eye.handHudViewFromPanel : eye.viewFromCenter,
+-              screen, gameProjection, gx::UseReversedZ, ndcRemap);
++              eye.projection, worldNameBalloon ? eye.viewFromScene
++                               : (eye.handHud ? eye.handHudViewFromPanel : eye.viewFromCenter),
++              screen, gameProjection, gx::UseReversedZ, ndcRemap, nameplatePlacement);
+           std::memcpy(uniform.data() + layout.projectionOffset, &projection, sizeof(projection));
++          const auto depth=activeWorldDepth.valid
++              ? stereo_replay::hud_depth_plane(activeWorldDepth.z, activeWorldDepth.constant,
++                                                stereoFrame.cockpit.unitsPerMeter,
++                                                eye.handHud && !worldNameBalloon)
++              : stereo_replay::HudDepthPlane{};
++          const float depthParameters[2]{depth.offset,depth.reciprocalW};
++          // The first two floats after the viewport sizes are reserved for
++          // the exact-screen-depth variant used only by stereo HUD draws.
++          std::memcpy(uniform.data() + 24,depthParameters,sizeof(depthParameters));
+         }
+ 
+         if (displayRegion.width > 0 && displayRegion.height > 0) {
+@@ -1582,11 +1630,6 @@ struct RenderInvocation {
+   bool encodeTextureBakes = true;
+   bool encodeResolves = true;
+   bool captureDepth = true;
+-  const StereoReplayFrame* cockpitFrame = nullptr;
+-  wgpu::CommandEncoder* cockpitEncoder = nullptr;
+-  cockpit::SceneDepth cockpitDepth{};
+-  bool* cockpitDrawn = nullptr;
+-  bool* sceneDrawn = nullptr;
+ };
+ 
+ static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vector<RenderPass>& passes, u32 idx,
+@@ -1786,7 +1829,6 @@ void render_stereo_eye(SealedFrame& frame, wgpu::CommandEncoder& cmd, const Ster
+   // past that copy blanks the very image the game presented.
+   const int32_t lastPass = get_stereo_stop_at_display_copy() ? displaySource.lastDisplayCopyPass : -1;
+   cockpit::SceneDepth cockpitDepth{};
+-  bool cockpitDrawn=false,sceneDrawn=false;
+   for(size_t i=0;i<frame.data().passes.size();++i) {
+     if(lastPass>=0 && i>static_cast<size_t>(lastPass)) break;
+     if(frame.data().passes[i].cockpitDepth.valid) cockpitDepth=frame.data().passes[i].cockpitDepth;
+@@ -1803,13 +1845,12 @@ void render_stereo_eye(SealedFrame& frame, wgpu::CommandEncoder& cmd, const Ster
+                   .encodeTextureBakes = false,
+                   .encodeResolves = false,
+                   .captureDepth = false,
+-                  .cockpitFrame = &stereoFrame,
+-                  .cockpitEncoder = &cmd,
+-                  .cockpitDepth = cockpitDepth,
+-                  .cockpitDrawn = &cockpitDrawn,
+-                  .sceneDrawn = &sceneDrawn,
+               });
+-  if(!cockpitDrawn) cockpit::render(cmd, stereoFrame, eye, cockpitDepth);
++  // The game's 2D HUD can overwrite the hand colour with dark or transparent
++  // pixels even when the tracked hand is physically in front of its plane.
++  // Draw the cockpit after the sealed GX scene. Its depth test still hides
++  // hands behind real world geometry and behind a nearer HUD panel.
++  cockpit::render(cmd, stereoFrame, eye, cockpitDepth);
+ }
+ 
+ void render(wgpu::CommandEncoder& cmd, int32_t interpolatedFrame, bool finalize) {
+@@ -1992,19 +2033,6 @@ static void render_pass_impl(const wgpu::RenderPassEncoder& pass, const std::vec
+                    draw.gx.interpolatedUniformRanges[invocation.interpolatedFrame].size != 0) {
+           uniformOverride = &draw.gx.interpolatedUniformRanges[invocation.interpolatedFrame];
+         }
+-        // Draw tracked controls against world depth before the first HUD draw
+-        // can write a screen-plane depth over it. Keep the existing pass open.
+-        if(invocation.cockpitFrame && invocation.cockpitDepth.valid) {
+-          if(draw.gx.uniformReplayLayout.perspective) *invocation.sceneDrawn=true;
+-          if(virtualScreenDraw && *invocation.sceneDrawn && !*invocation.cockpitDrawn) {
+-            cockpit::render(*invocation.cockpitEncoder,*invocation.cockpitFrame,invocation.stereoEye,
+-                invocation.cockpitDepth,&pass);
+-            *invocation.cockpitDrawn=true;
+-            encodeState={};encodeState.boundTextureBindGroup=gx::g_emptyTextureBindGroup.Get();
+-            pass.SetBindGroup(0,g_staticBindGroup);pass.SetBindGroup(2,gx::g_emptyTextureBindGroup);
+-            scissorStateKnown=viewportStateKnown=false;
+-          }
+-        }
+         // Such a draw no longer lands where the game aimed it, while the
+         // recorded scissor still describes the rectangle it occupied on the flat
+         // frame (Mario Kart clips the item roulette that way). Honouring that
+diff --git a/aurora-main/lib/gfx/common.hpp b/aurora-main/lib/gfx/common.hpp
+index 7635f8e..ee87b36 100644
+--- a/aurora-main/lib/gfx/common.hpp
++++ b/aurora-main/lib/gfx/common.hpp
+@@ -390,6 +390,10 @@ bool get_stereo_skip_copy_clears() noexcept;
+ // `width` and `distance` are in game world units; the screen's height follows
+ // the game's presented aspect ratio. Also live.
+ void set_stereo_hud_screen(bool enabled, float width, float distance) noexcept;
++void set_stereo_hud_world_depth(float distance) noexcept;
++float get_stereo_hud_world_depth() noexcept;
++void set_stereo_hud_world_anchor(float x, float y) noexcept;
++std::pair<float, float> get_stereo_hud_world_anchor() noexcept;
+ bool get_stereo_hud_screen_enabled() noexcept;
+ 
+ void begin_offscreen(uint32_t width, uint32_t height);
+diff --git a/aurora-main/lib/gfx/stereo_replay.hpp b/aurora-main/lib/gfx/stereo_replay.hpp
+index 222c83d..e06c360 100644
+--- a/aurora-main/lib/gfx/stereo_replay.hpp
++++ b/aurora-main/lib/gfx/stereo_replay.hpp
+@@ -1,6 +1,8 @@
+ #pragma once
+ 
+ #include <aurora/math.hpp>
++#include <algorithm>
++#include <cmath>
+ 
+ namespace aurora::gfx::stereo_replay {
+ 
+@@ -66,6 +68,28 @@ struct HudScreen {
+   [[nodiscard]] bool valid() const noexcept { return halfWidth > 0.0f && halfHeight > 0.0f && distance > 0.0f; }
+ };
+ 
++// The fragment shader receives the reciprocal clip W in position.w. Reuse
++// the world's perspective depth mapping for the physical HUD plane, so hands
++// in front of that plane can pass the same depth test as game geometry.
++struct HudDepthPlane {
++  float offset = 0.5f;
++  float reciprocalW = 0.0f;
++};
++
++// Keep authored UI layers distinct in Depth32Float at both near and far
++// panel distances. A fixed 1e-5 multiplier erased MKW's 0.01-unit separation
++// between its minimap portrait and the black shadows drawn after it.
++constexpr float HudLayerRelativeDepthRange = 0.05f;
++inline float hud_layer_depth(float panelDepth, float originalDepth) noexcept {
++  return std::clamp(panelDepth + (originalDepth - 0.5f) *
++                    std::abs(panelDepth) * HudLayerRelativeDepthRange, 0.0f, 1.0f);
++}
++
++inline HudDepthPlane hud_depth_plane(float worldZ, float worldConstant,
++                                    float unitsPerMeter, bool panelInMeters) noexcept {
++  return {-worldZ, worldConstant / (panelInMeters ? std::max(unitsPerMeter, 0.001f) : 1.0f)};
++}
++
+ // Converts a draw's viewport-local NDC into the NDC of the complete displayed
+ // frame. It is identity for a full-frame viewport. Virtual-screen replay uses a
+ // full-eye host viewport, so this keeps sub-pane HUD elements in their original
+@@ -77,6 +101,13 @@ struct HudNdcRemap {
+   float offsetY = 0.0f;
+ };
+ 
++struct HudOverlayPlacement {
++  float anchorX = 0.0f;
++  float anchorY = 0.0f;
++  float scale = 1.0f;
++  float liftNdc = 0.0f;
++};
++
+ inline HudNdcRemap make_hud_ndc_remap(float viewportLeft, float viewportTop, float viewportWidth, float viewportHeight,
+                                       float frameLeft, float frameTop, float frameWidth, float frameHeight) noexcept {
+   if (!(frameWidth > 0.0f) || !(frameHeight > 0.0f)) {
+@@ -109,8 +140,8 @@ inline bool is_orthographic_projection(const Mat4x4<float>& projection) noexcept
+ 
+ // The stored GX projection has not yet passed through Aurora's final clip-depth
+ // conversion. Turn its Z row into the 0..1 backend NDC value that the original
+-// orthographic draw would have produced. The virtual-screen shader captures
+-// this row before replacing raster depth with a stable midrange value.
++// orthographic draw would have produced. The virtual-screen shader keeps a
++// tiny part of this value to order HUD layers on the physical panel.
+ inline Vec4<float> backend_ndc_depth_row(const Mat4x4<float>& projection, bool reversedDepth) noexcept {
+   Vec4<float> row{};
+   for (size_t i = 0; i < 4; ++i) {
+@@ -135,23 +166,32 @@ inline Vec4<float> backend_ndc_depth_row(const Mat4x4<float>& projection, bool r
+ // Each step is affine in the vertex position, so the whole chain collapses into
+ // one projection matrix and the draw's own position matrices stay untouched.
+ //
+-// The composed Z row carries the original flat-screen NDC depth. The exact-depth
+-// vertex variant captures it, then parks clip depth in the middle of the volume
+-// for stable rasterization; the fragment variant exports the captured value.
+-// Keeping original depth out of the VR perspective divide is what makes
+-// equal-depth 2D layers deterministic under head rotation and translation.
++// The composed Z row carries the original flat-screen NDC depth. The stereo
++// vertex variant captures it, then parks raster depth in the middle of the
++// volume. Its fragment variant uses the panel's physical depth, with only a
++// small bias from the captured value to order overlapping 2D layers.
+ inline Mat4x4<float> compose_hud_screen_projection(const Mat4x4<float>& eyeFrustum, const Mat3x4<float>& viewFromCenter,
+                                                    const HudScreen& screen, const Mat4x4<float>& gameProjection,
+-                                                   bool reversedDepth, const HudNdcRemap& ndcRemap = {}) noexcept {
++                                                   bool reversedDepth, const HudNdcRemap& ndcRemap = {},
++                                                   const HudOverlayPlacement& placement = {}) noexcept {
+   const Mat4x4<float> frameProjection = remap_hud_ndc(gameProjection, ndcRemap);
+   // The screen point's three coordinates, each as a functional of (mv_pos, 1).
+   Mat3x4<float> screenPoint{};
+   for (size_t i = 0; i < 4; ++i) {
+-    screenPoint.m0[i] = frameProjection.m0[i] * screen.halfWidth;
+-    screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight;
++    screenPoint.m0[i] = frameProjection.m0[i] * screen.halfWidth * placement.scale;
++    screenPoint.m1[i] = frameProjection.m1[i] * screen.halfHeight * placement.scale;
+     screenPoint.m2[i] = 0.0f;
+   }
+   screenPoint.m2[3] = -screen.distance;
++  // Shrink around the nameplate's own screen position. Scaling around the
++  // frame center would pull every other player's label toward the local kart.
++  const float anchorNdcX = frameProjection.m0[0] * placement.anchorX +
++                           frameProjection.m0[1] * placement.anchorY + frameProjection.m0[3];
++  const float anchorNdcY = frameProjection.m1[0] * placement.anchorX +
++                           frameProjection.m1[1] * placement.anchorY + frameProjection.m1[3];
++  screenPoint.m0[3] += anchorNdcX * screen.halfWidth * (1.0f - placement.scale);
++  screenPoint.m1[3] += (anchorNdcY * (1.0f - placement.scale) +
++                       placement.liftNdc) * screen.halfHeight;
+ 
+   // The same functionals carried into eye view space. viewFromCenter's own
+   // translation column joins the constant term, the one place the implicit 1 of
+diff --git a/aurora-main/lib/gx/command_processor.cpp b/aurora-main/lib/gx/command_processor.cpp
+index b30249e..2541f87 100644
+--- a/aurora-main/lib/gx/command_processor.cpp
++++ b/aurora-main/lib/gx/command_processor.cpp
+@@ -2300,7 +2300,13 @@ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, g
+       };
+     }
+   const bool perspective = g_gxState.projType == GX_PERSPECTIVE;
+-  const auto uniformRanges = build_uniform(info, vertRange.offset, ranges, drawIdentity, perspective, usedPnMtxMask);
++  auto uniformRanges = build_uniform(info, vertRange.offset, ranges, drawIdentity, perspective, usedPnMtxMask);
++  if (!perspective && aurora::stereo_frame_provider_active()) {
++    uniformRanges.replayLayout.worldHudDepth = aurora::gfx::get_stereo_hud_world_depth();
++    const auto [anchorX, anchorY] = aurora::gfx::get_stereo_hud_world_anchor();
++    uniformRanges.replayLayout.worldHudAnchorX = anchorX;
++    uniformRanges.replayLayout.worldHudAnchorY = anchorY;
++  }
+   const auto& replayLayout = uniformRanges.replayLayout;
+   const gfx::PipelineRef exactScreenDepthPipeline =
+       aurora::stereo_frame_provider_active() && !replayLayout.perspective && !replayLayout.nativeEfbEffect
+diff --git a/aurora-main/lib/gx/pipeline.hpp b/aurora-main/lib/gx/pipeline.hpp
+index 05539af..09c71f9 100644
+--- a/aurora-main/lib/gx/pipeline.hpp
++++ b/aurora-main/lib/gx/pipeline.hpp
+@@ -22,7 +22,7 @@ struct DrawData {
+   uint32_t dstAlpha;
+ };
+ 
+-constexpr uint32_t GXPipelineConfigVersion = 21;
++constexpr uint32_t GXPipelineConfigVersion = 22;
+ 
+ constexpr GXFogType effective_pipeline_fog_type(GXFogType fogType, GXZTexOp zTextureOp, bool zCompLocBeforeTex,
+                                                 GXBlendMode blendMode, GXLogicOp logicOp) noexcept {
+diff --git a/aurora-main/lib/gx/shader.cpp b/aurora-main/lib/gx/shader.cpp
+index 37c11bb..eb5ede6 100644
+--- a/aurora-main/lib/gx/shader.cpp
++++ b/aurora-main/lib/gx/shader.cpp
+@@ -1,4 +1,5 @@
+ #include "../gfx/common.hpp"
++#include "../gfx/stereo_replay.hpp"
+ 
+ #include "../internal.hpp"
+ #include "../webgpu/gpu.hpp"
+@@ -1646,12 +1647,19 @@ wgpu::ShaderModule build_shader(const ShaderConfig& config) noexcept {
+         "};";
+ 
+     if (config.exactScreenDepth) {
+-      // Fragment depth is already in window coordinates. Reapply the recorded
+-      // viewport's clamped depth window exactly as the fixed pipeline did.
++      // Orthographic Wii depth is unrelated to the physical VR panel's
++      // distance. The stereo uniforms provide the world depth mapping as
++      // offset + coefficient / clipW. Fragment position.w is 1 / clipW.
++      // Use a relative depth interval: a fixed 1e-5 interval rounds nearby
++      // authored layers to the same Depth32Float value (portrait/shadow).
++      // Limit the full interval to 5% of panel depth to retain hand occlusion.
+       fragmentFn +=
+           "\n    if (any(in.screen_clip_position < ubuf.screen_clip_rect.xy) || any(in.screen_clip_position >= ubuf.screen_clip_rect.zw)) { discard; }"
+-          "\n    let fragDepth = ubuf.exact_screen_depth_range.x + "
+-          "in.exact_screen_depth * ubuf.exact_screen_depth_range.y;";
++          "\n    let panelDepth = ubuf.screen_depth_parameters.x + "
++          "ubuf.screen_depth_parameters.y * in.pos.w;";
++      fragmentFn += fmt::format(
++          "\n    let fragDepth = clamp(panelDepth + (in.exact_screen_depth - 0.5) * "
++          "abs(panelDepth) * {}, 0.0, 1.0);", gfx::stereo_replay::HudLayerRelativeDepthRange);
+     } else {
+       fragmentFn += fmt::format("\n    let fragDepth = {}ztexDepth;", UseReversedZ ? "" : "1.0 - ");
+     }
+@@ -2037,7 +2045,7 @@ struct Uniform {{
+     current_pnmtx: u32,
+     render_viewport_size: vec2f,
+     logical_viewport_size: vec2f,
+-    exact_screen_depth_range: vec2f,
++    screen_depth_parameters: vec2f,
+     array_start: array<u32, 12>,
+     screen_clip_rect: vec4f,
+     screen_clip_x: vec4f,
+diff --git a/aurora-main/lib/gx/shader_info.cpp b/aurora-main/lib/gx/shader_info.cpp
+index f05af49..4ca06f3 100644
+--- a/aurora-main/lib/gx/shader_info.cpp
++++ b/aurora-main/lib/gx/shader_info.cpp
+@@ -608,8 +608,8 @@ UniformRanges build_uniform(const ShaderInfo& info, u32 vtxStart, const BindGrou
+   stage_f32(g_gxState.renderViewport.height);
+   stage_f32(g_gxState.logicalViewport.width);
+   stage_f32(g_gxState.logicalViewport.height);
+-  // Fragment-depth output bypasses the fixed viewport transform, so exact
+-  // screen depth applies that same clamped window explicitly.
++  // The stereo replay replaces these values with the physical HUD depth
++  // plane; retain the original viewport range in the recorded mono uniform.
+   stage_f32(depthNear);
+   stage_f32(depthFar - depthNear);
+   for (const auto& vaRange : ranges.vaRanges) {
+diff --git a/aurora-main/lib/gx/shader_info.hpp b/aurora-main/lib/gx/shader_info.hpp
+index 282fc8e..9e6162e 100644
+--- a/aurora-main/lib/gx/shader_info.hpp
++++ b/aurora-main/lib/gx/shader_info.hpp
+@@ -20,6 +20,9 @@ struct UniformReplayLayout {
+   // Perspective overlays drawn without any depth interaction belong to the
+   // original camera (screen-attached models), not to the relocated world.
+   bool cameraOverlay = false;
++  float worldHudDepth = 0.0f;
++  float worldHudAnchorX = 0.0f;
++  float worldHudAnchorY = 0.0f;
+ };
+ 
+ struct UniformRanges {
+diff --git a/aurora-main/lib/vr_ui.hpp b/aurora-main/lib/vr_ui.hpp
+index c973374..17b19c4 100644
+--- a/aurora-main/lib/vr_ui.hpp
++++ b/aurora-main/lib/vr_ui.hpp
+@@ -34,7 +34,11 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
+   const int quality=(eye==0 || activeQuality<0)?requestedQuality.load(std::memory_order_relaxed):activeQuality;
+   if(!pipeline || format!=output.format || activeQuality!=quality) {
+     activeQuality=quality;
+-    wgpu::ShaderSourceWGSL code{};code.code=R"(
++    // The field is composited at the headset cadence, independently of the
++    // Wii's 60 Hz menu logic. Specialize the march budget with the selected
++    // quality: the old 28x6 loop at 1440 pixels per eye missed XR deadlines
++    // even on fast GPUs and effectively halved fresh menu images.
++    std::string shaderCode=R"(
+       @group(0) @binding(0) var samp: sampler;
+       @group(0) @binding(1) var tex: texture_2d<f32>;
+       struct O { @builtin(position) p: vec4f, @location(0) uv: vec2f, @location(1) c: vec3f, @location(2) t: f32, @location(3) origin:vec3f };
+@@ -43,9 +47,9 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
+       // March the same world-space field from each eye, including translation.
+       fn dielectric(ray:vec3f,origin:vec3f,time:f32)->vec4f {
+         var z=0.3; var light=vec4f(0);
+-        for(var step=0;step<28;step++) {
++        for(var step=0;step<__STEPS__;step++) {
+           var p=origin+z*ray; var t=p; var d=3.0;
+-          for(var octave=0;octave<6;octave++) {
++          for(var octave=0;octave<__OCTAVES__;octave++) {
+             p+=sin(p.zxy*d-vec3f(time))/d; d+=d;
+           }
+           z+=max(abs(1.0-length(p.xy))/3.0,0.001);
+@@ -68,6 +72,13 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
+         return mix(vec4f(i.c,1),textureSampleLevel(tex,samp,i.uv,0),i.t);
+       }
+     )";
++    const auto specialize=[&](std::string_view marker,int value) {
++      const auto at=shaderCode.find(marker);
++      shaderCode.replace(at,marker.size(),std::to_string(value));
++    };
++    specialize("__STEPS__",quality==3?20:quality==2?16:12);
++    specialize("__OCTAVES__",quality==3?5:quality==2?4:3);
++    wgpu::ShaderSourceWGSL code{};code.code=shaderCode.c_str();
+     wgpu::ShaderModuleDescriptor md{};md.nextInChain=&code;auto shader=g_device.CreateShaderModule(&md);
+     const wgpu::VertexAttribute attrs[]={{.format=wgpu::VertexFormat::Float32x4,.offset=0,.shaderLocation=0},
+       {.format=wgpu::VertexFormat::Float32x2,.offset=16,.shaderLocation=1},
+@@ -83,7 +94,7 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
+     pd.vertex={.module=shader,.entryPoint="vs",.bufferCount=1,.buffers=&vb};pd.fragment=&fs;
+     pipeline=g_device.CreateRenderPipeline(&pd);format=output.format;
+     // Resolution covers one eye's visible field, not an entire 360-degree map.
+-    const uint32_t sizes[]{1,640,960,1440};
++    const uint32_t sizes[]{1,576,864,1152};
+     const wgpu::TextureDescriptor td{.label="Dielectric stereo field",.usage=wgpu::TextureUsage::RenderAttachment|wgpu::TextureUsage::TextureBinding,
+       .dimension=wgpu::TextureDimension::e2D,.size={sizes[quality],sizes[quality],1},.format=output.format,.mipLevelCount=1,.sampleCount=1};
+     panorama=g_device.CreateTexture(&td);panoramaView=panorama.CreateView();
+@@ -237,4 +248,3 @@ void render(wgpu::CommandEncoder& encoder,const webgpu::PresentSource& source,co
+   pass.End();
+ }
+ }
+-
+diff --git a/aurora-main/tests/gx_test_stubs.cpp b/aurora-main/tests/gx_test_stubs.cpp
+index 6a1fa2f..514b2a7 100644
+--- a/aurora-main/tests/gx_test_stubs.cpp
++++ b/aurora-main/tests/gx_test_stubs.cpp
+@@ -79,6 +79,8 @@ wgpu::Buffer g_indexBuffer;
+ wgpu::Buffer g_storageBuffer;
+ uint32_t g_drawCallCount = 0;
+ uint32_t g_mergedDrawCallCount = 0;
++float get_stereo_hud_world_depth() noexcept { return 0.0f; }
++std::pair<float, float> get_stereo_hud_world_anchor() noexcept { return {0.0f, 0.0f}; }
+ } // namespace aurora::gfx
+ 
+ namespace aurora::webgpu {
+diff --git a/aurora-main/tests/stereo_replay_test.cpp b/aurora-main/tests/stereo_replay_test.cpp
+index c88cf68..4ff27cb 100644
+--- a/aurora-main/tests/stereo_replay_test.cpp
++++ b/aurora-main/tests/stereo_replay_test.cpp
+@@ -8,6 +8,53 @@
+ namespace aurora::gfx::stereo_replay {
+ namespace {
+ 
++TEST(StereoReplayTest, MinimapPortraitAndShadowsRemainDistinctInFloatDepth) {
++  // Original Race.szs: portrait Z=0, shadows Z=-0.01, local searchlight Z=-0.02.
++  // A 1000-unit UI depth window produces 1e-5 normalized separation.
++  const float portrait = 0.5f;
++  const float shadow = portrait - 0.01f / 1000.0f;
++  const float searchlight = portrait - 0.02f / 1000.0f;
++  EXPECT_FLOAT_EQ(0.5f + (portrait - 0.5f) * 0.00001f,
++                  0.5f + (shadow - 0.5f) * 0.00001f);
++  for (float panel : {0.0001f, 0.01f, 0.1f, 0.5f, 0.9f}) {
++    const float colorDepth = hud_layer_depth(panel, portrait);
++    const float shadowDepth = hud_layer_depth(panel, shadow);
++    const float lightDepth = hud_layer_depth(panel, searchlight);
++    // Shadows are submitted after the portrait. Even LEQUAL in guest Z
++    // (GreaterEqual in reversed Z) must reject them over the colored pixels.
++    EXPECT_LT(shadowDepth, std::nextafter(std::nextafter(colorDepth, 0.f), 0.f));
++    EXPECT_LT(lightDepth, shadowDepth);
++  }
++}
++
++TEST(StereoReplayTest, HudLayerOrderingRetainsPhysicalHandOcclusion) {
++  for (float distance : {0.4f, 1.0f, 2.0f, 10.0f}) {
++    const float panel = 0.1f / distance;
++    const float nearerHand = 0.1f / (distance * 0.95f);
++    const float fartherHand = 0.1f / (distance * 1.05f);
++    for (float authoredDepth : {0.0f, 0.5f, 1.0f}) {
++      const float hud = hud_layer_depth(panel, authoredDepth);
++      EXPECT_GT(nearerHand, hud);
++      EXPECT_LT(fartherHand, hud);
++    }
++  }
++}
++
++TEST(StereoReplayTest, PhysicalHudDepthKeepsNearbyHandsInFrontAtAnyWorldScale) {
++  // Reversed Z: larger values are nearer. The same 2 m HUD must remain
++  // behind a hand at 0.4 m whether the eye replay uses metres or game units.
++  for (const float unitsPerMeter : {1.0f, 50.0f}) {
++    const float worldConstant = 0.2f * unitsPerMeter;
++    const auto worldPlane = hud_depth_plane(0.0f, worldConstant, unitsPerMeter, false);
++    const auto handPlane = hud_depth_plane(0.0f, worldConstant, unitsPerMeter, true);
++    const float worldHudDepth = worldPlane.offset + worldPlane.reciprocalW / (2.0f * unitsPerMeter);
++    const float handHudDepth = handPlane.offset + handPlane.reciprocalW / 2.0f;
++    const float handDepth = handPlane.offset + handPlane.reciprocalW / 0.4f;
++    EXPECT_NEAR(worldHudDepth, handHudDepth, 1e-6f);
++    EXPECT_GT(handDepth, worldHudDepth);
++  }
++}
++
+ TEST(StereoReplayTest, EyeFrustumPreservesGameDepthMapping) {
+   const Mat4x4<float> game{
+       {10.0f, 11.0f, 12.0f, 13.0f},
+@@ -147,6 +194,28 @@ TEST(StereoReplayTest, HudScreenProjectionMatchesTheChainItComposes) {
+   }
+ }
+ 
++TEST(StereoReplayTest, WorldNameplateShrinksAroundItsPlayerAndMovesUp) {
++  const auto game = game_orthographic_projection();
++  Mat4x4<float> eye{};
++  eye.m0 = {1.0f, 0.0f, 0.0f, 0.0f};
++  eye.m1 = {0.0f, 1.0f, 0.0f, 0.0f};
++  Mat3x4<float> view{};
++  view.m0 = {1.0f, 0.0f, 0.0f, 0.0f};
++  view.m1 = {0.0f, 1.0f, 0.0f, 0.0f};
++  view.m2 = {0.0f, 0.0f, 1.0f, 0.0f};
++  const HudScreen screen{2.0f, 1.5f, 4.0f};
++  const Vec4<float> anchor{480.0f, 300.0f, 0.0f, 1.0f};
++  const Vec4<float> edge{520.0f, 300.0f, 0.0f, 1.0f};
++  const auto original = compose_hud_screen_projection(eye, view, screen, game, true);
++  const auto placed = compose_hud_screen_projection(
++      eye, view, screen, game, true, {}, {480.0f, 300.0f, 0.55f, 0.07f});
++  EXPECT_NEAR(dot4(placed.m0, anchor), dot4(original.m0, anchor), 1e-5f);
++  EXPECT_NEAR(dot4(placed.m1, anchor) - dot4(original.m1, anchor),
++              0.07f * screen.halfHeight, 1e-5f);
++  EXPECT_NEAR(dot4(placed.m0, edge) - dot4(placed.m0, anchor),
++              0.55f * (dot4(original.m0, edge) - dot4(original.m0, anchor)), 1e-5f);
++}
++
+ TEST(StereoReplayTest, HudScreenParksRasterDepthAtMidrangeUnderHeadMotion) {
+   const auto game = game_orthographic_projection();
+   Mat4x4<float> eyeFrustum{};
+@@ -296,4 +365,3 @@ TEST(StereoReplayTest, HandPanelKeepsMetricSizeAndStereoDisparity) {
+ 
+ } // namespace
+ } // namespace aurora::gfx::stereo_replay
+-
+diff --git a/projects/mkwii/recomp.yml b/projects/mkwii/recomp.yml
+index 375bb96..1004865 100644
+--- a/projects/mkwii/recomp.yml
++++ b/projects/mkwii/recomp.yml
+@@ -46,6 +46,8 @@ translation:
+       - 0x805549B0 # RaceScene::OnExit
+       - 0x805A21D0 # RaceCamera::Update
+       - 0x805B1CD8 # ScnMgrRace::Draw
++      - 0x8063DB84 # LayoutUIControl::Draw (world-positioned racer labels)
++      - 0x807F1094 # CtrlRaceNameBalloon::UpdatePosition (active racer id)
+ 
+ runtime:
+   native_registration_root: runtime/src
+diff --git a/runtime/include/native_cpu_calls.inc b/runtime/include/native_cpu_calls.inc
+index a0d1515..1e7058c 100644
+--- a/runtime/include/native_cpu_calls.inc
++++ b/runtime/include/native_cpu_calls.inc
+@@ -98,5 +98,9 @@ MKW_KNOWN_NATIVE_CPU_CALL(0x80084D20u, nw4r__lyt__detail__DrawQuad_80084d20);
+ // invokes the original translated function before extending a rejected box.
+ extern "C" void IntersectAabbForVr(CpuContext* ctx);
+ MKW_KNOWN_NATIVE_CPU_CALL(0x80086610u, IntersectAabbForVr);
++// The race scene calls ClipInfoMgr::Update through a translated direct call.
++// Keep that edge on InvokeDirectCpu so its VR post-processing is not skipped.
++extern "C" void UpdateClipInfoForVr(CpuContext* ctx);
++MKW_KNOWN_NATIVE_CPU_CALL(0x80787774u, UpdateClipInfoForVr);
+ 
+ #undef MKW_KNOWN_NATIVE_CPU_CALL
+diff --git a/runtime/include/runtime_config.h b/runtime/include/runtime_config.h
+index 8e508ee..3638142 100644
+--- a/runtime/include/runtime_config.h
++++ b/runtime/include/runtime_config.h
+@@ -41,6 +41,7 @@ struct RuntimeUserConfig {
+     bool vrAdaptiveResolution=false;
+     int vrMenuShaderQuality=3;
+     bool vrSwapItemTrick=false, vrSwapCockpitDriftBrake=false;
++    int vrFirstPersonMotionLevel=4;
+     std::optional<bool> widescreen;
+     std::optional<int32_t> windowPosX;
+     std::optional<int32_t> windowPosY;
+@@ -71,6 +72,7 @@ struct RuntimeUserConfig {
+     std::optional<bool> vrStopAtDisplayCopy;
+     std::optional<bool> vrSkipCopyClears;
+     std::optional<bool> vrFirstPerson;
++    std::optional<bool> vrFirstPersonFollowVehicleMotion;
+     std::optional<bool> vrNativeSteeringWheel;
+     std::optional<float> vrFirstPersonUnitsPerMeter;
+     std::optional<float> vrFirstPersonHeadUpMeters;
+@@ -367,6 +369,11 @@ inline void EnsureConfigFile() {
+               "# below replaces world_units_per_meter while it is engaged: 10 is\n"
+               "# life-size, where the 500 above makes the race a small diorama.\n"
+               "first_person = false\n"
++              "# Follow the kart's tilt in first person. Safe tilt is the default;\n"
++              "# choose another detail level below for more vehicle movement.\n"
++              "first_person_follow_vehicle_motion = true\n"
++              "# 1 = tilt, 2 = tilt + side-to-side, 3 = all animation, 4 = safe tilt.\n"
++              "first_person_motion_level = 4\n"
+               "native_steering_wheel = true\n"
+               "first_person_units_per_meter = 100.0\n"
+               "# Where the head sits in the kart's own frame, in metres.\n"
+@@ -542,6 +549,13 @@ inline RuntimeUserConfig ParseConfigDocument(const toml::value& document) {
+     config.vrStopAtDisplayCopy = FindConfigValue<bool>(document, "vr", "stop_at_display_copy");
+     config.vrSkipCopyClears = FindConfigValue<bool>(document, "vr", "skip_copy_clears");
+     config.vrFirstPerson = FindConfigValue<bool>(document, "vr", "first_person");
++    config.vrFirstPersonFollowVehicleMotion =
++        FindConfigValue<bool>(document, "vr", "first_person_follow_vehicle_motion");
++    // A previously enabled installation without a detail level used full
++    // motion. New installations start with the gentler Safe selection.
++    config.vrFirstPersonMotionLevel = std::clamp(
++        FindConfigValue<int>(document, "vr", "first_person_motion_level")
++            .value_or(config.vrFirstPersonFollowVehicleMotion.value_or(false) ? 3 : 4), 1, 4);
+     config.vrNativeSteeringWheel = FindConfigValue<bool>(document, "vr", "native_steering_wheel");
+     config.vrWelcomeComplete=FindConfigValue<bool>(document,"vr","welcome_complete").value_or(false);
+     config.vrDefaultCamera=std::clamp(FindConfigValue<int>(document,"vr","default_camera").value_or(0),0,2);
+@@ -868,6 +882,16 @@ inline bool SetVrFirstPerson(bool value) {
+     return WriteSetting("vr", "first_person", value ? "true" : "false");
+ }
+ 
++inline bool SetVrFirstPersonFollowVehicleMotion(bool value) {
++    Mutable().vrFirstPersonFollowVehicleMotion = value;
++    return WriteSetting("vr", "first_person_follow_vehicle_motion", value ? "true" : "false");
++}
++
++inline bool SetVrFirstPersonMotionLevel(int value) {
++    Mutable().vrFirstPersonMotionLevel = std::clamp(value, 1, 4);
++    return WriteSetting("vr", "first_person_motion_level", std::to_string(Mutable().vrFirstPersonMotionLevel));
++}
++
+ inline bool SetVrNativeSteeringWheel(bool value) {
+     Mutable().vrNativeSteeringWheel = value;
+     return WriteSetting("vr", "native_steering_wheel", value ? "true" : "false");
+@@ -1200,6 +1224,14 @@ inline bool VrFirstPerson(bool fallback = false) {
+     return Get().vrFirstPerson.value_or(fallback);
+ }
+ 
++inline bool VrFirstPersonFollowVehicleMotion() {
++    return Get().vrFirstPersonFollowVehicleMotion.value_or(true);
++}
++
++inline int VrFirstPersonMotionLevel() {
++    return std::clamp(Get().vrFirstPersonMotionLevel, 1, 4);
++}
++
+ inline float VrFirstPersonUnitsPerMeter(float fallback = 100.0f) {
+     return std::clamp(Get().vrFirstPersonUnitsPerMeter.value_or(fallback), 1.0f, 10000.0f);
+ }
+diff --git a/runtime/include/vr/mkw_vr_first_person.h b/runtime/include/vr/mkw_vr_first_person.h
+index 2ed7f33..96c4cce 100644
+--- a/runtime/include/vr/mkw_vr_first_person.h
++++ b/runtime/include/vr/mkw_vr_first_person.h
+@@ -16,6 +16,23 @@ namespace mkw::vr {
+ // as Aurora's Mat3x4: a point is transformed as out = M * (p, 1).
+ using Mtx34 = std::array<float, 12>;
+ 
++enum class FirstPersonMotionLevel : uint8_t {
++    Tilt = 1,
++    TiltAndLateral = 2,
++    Full = 3,
++    Safe = 4,
++};
++
++// KartAIController::IsInABill (80726560) checks bit 27 of Kart::Status+0x0C.
++// This is the active transformation, not merely a Bullet Bill held as an item.
++inline constexpr bool IsBulletBillActive(uint32_t status_flags) noexcept {
++    return (status_flags & 0x08000000u) != 0;
++}
++
++inline constexpr CameraMode EffectiveCameraMode(CameraMode selected, bool bullet_active) noexcept {
++    return bullet_active ? CameraMode::Game : selected;
++}
++
+ inline constexpr Mtx34 kIdentityMtx34{
+     1.0f, 0.0f, 0.0f, 0.0f, //
+     0.0f, 1.0f, 0.0f, 0.0f, //
+@@ -260,12 +277,15 @@ inline WheelGeometry ComputeNativeHandlebarGeometry(const Mtx34& seatFromHandle,
+ // The translation moves the camera onto the head. With level_horizon the
+ // rotation keeps the recorded camera's heading but drops its pitch and roll, so
+ // the headset owns pitch and roll outright; without it the recorded camera's
+-// orientation is kept whole and only the eye moves. Returns false and leaves
+-// `out` untouched when the inputs cannot produce an orthonormal frame.
++// orientation is kept whole and only the eye moves. follow_vehicle_rotation
++// instead uses the kart's complete animated frame, including bank and spin.
++// Returns false and leaves `out` untouched when the inputs cannot produce an
++// orthonormal frame.
+ inline bool ComputeFirstPersonAnchor(const Mtx34& view_from_world, const Mtx34& kart_from_local,
+                                      float head_right_units, float head_up_units,
+                                      float head_forward_units, bool level_horizon,
+-                                     Mtx34& out, bool align_to_kart = false) noexcept {
++                                     Mtx34& out, bool align_to_kart = false,
++                                     bool follow_vehicle_rotation = false) noexcept {
+     using namespace detail;
+     if (!IsFiniteMtx34(view_from_world) || !IsFiniteMtx34(kart_from_local)) {
+         return false;
+@@ -280,7 +300,33 @@ inline bool ComputeFirstPersonAnchor(const Mtx34& view_from_world, const Mtx34&
+     // Rows of the anchor's rotation. Identity keeps the recorded camera's own
+     // orientation and moves the eye only.
+     Vec3 rows[3]{{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+-    if (level_horizon) {
++    if (follow_vehicle_rotation) {
++        // Kart +Z is forward and +Y is its animated up. Express both in the
++        // recorded view, then remove scale and shear before moving the HMD.
++        Vec3 forward{
++            view_from_world[0] * kart_from_local[2] + view_from_world[1] * kart_from_local[6] +
++                view_from_world[2] * kart_from_local[10],
++            view_from_world[4] * kart_from_local[2] + view_from_world[5] * kart_from_local[6] +
++                view_from_world[6] * kart_from_local[10],
++            view_from_world[8] * kart_from_local[2] + view_from_world[9] * kart_from_local[6] +
++                view_from_world[10] * kart_from_local[10]};
++        Vec3 up{
++            view_from_world[0] * kart_from_local[1] + view_from_world[1] * kart_from_local[5] +
++                view_from_world[2] * kart_from_local[9],
++            view_from_world[4] * kart_from_local[1] + view_from_world[5] * kart_from_local[5] +
++                view_from_world[6] * kart_from_local[9],
++            view_from_world[8] * kart_from_local[1] + view_from_world[9] * kart_from_local[5] +
++                view_from_world[10] * kart_from_local[9]};
++        if (!Normalize(forward)) return false;
++        const float along = Dot(up, forward);
++        up = {up.x - along * forward.x, up.y - along * forward.y, up.z - along * forward.z};
++        if (!Normalize(up)) return false;
++        Vec3 right = Cross(forward, up);
++        if (!Normalize(right)) return false;
++        rows[0] = right;
++        rows[1] = Cross(right, forward);
++        rows[2] = {-forward.x, -forward.y, -forward.z};
++    } else if (level_horizon) {
+         // World +Y in view coordinates: the column of the view rotation that
+         // the world up axis selects.
+         Vec3 up{view_from_world[1], view_from_world[5], view_from_world[9]};
+@@ -337,6 +383,133 @@ inline bool ComputeFirstPersonAnchor(const Mtx34& view_from_world, const Mtx34&
+     return true;
+ }
+ 
++// Keep the simulation heading in the two comfort modes. The physics pose
++// supplies track pitch and bank without the rendered body's damage/trick
++// animation. Only the second level adds the body's sideways seat displacement.
++// Full motion uses the rendered body as-is, including impacts and tricks.
++inline bool ComposeFirstPersonMotionPose(const Mtx34& stable, const Mtx34& physics,
++                                         const Mtx34* visual, FirstPersonMotionLevel level,
++                                         bool animated_event, float max_lateral_units,
++                                         Mtx34& out) noexcept {
++    using namespace detail;
++    if (!IsFiniteMtx34(stable)) return false;
++    if (level == FirstPersonMotionLevel::Full) {
++        if (!visual || !IsFiniteMtx34(*visual)) return false;
++        out = *visual;
++        return true;
++    }
++    if (animated_event) {
++        out = stable;
++        return true;
++    }
++    if (!IsFiniteMtx34(physics)) return false;
++    Vec3 forward{stable[2], 0, stable[10]};
++    Vec3 physicalForward{physics[2], physics[6], physics[10]};
++    Vec3 physicalUp{physics[1], physics[5], physics[9]};
++    if (!Normalize(forward) || !Normalize(physicalForward) || !Normalize(physicalUp) ||
++        std::abs(Dot(physicalForward, physicalUp)) > 0.95f) return false;
++    const Vec3 worldUp{0,1,0};
++    Vec3 right = Cross(worldUp, forward);
++    if (!Normalize(right)) return false;
++    const float pitch = std::asin(std::clamp(physicalForward.y, -1.0f, 1.0f));
++    const float cp = std::cos(pitch), sp = std::sin(pitch);
++    const Vec3 pitchedForward{forward.x * cp, sp, forward.z * cp};
++    const Vec3 pitchedUp{-forward.x * sp, cp, -forward.z * sp};
++    const float roll = std::atan2(-Dot(physicalUp, right), Dot(physicalUp, pitchedUp));
++    const float cr = std::cos(roll), sr = std::sin(roll);
++    const Vec3 tiltedRight{right.x * cr + pitchedUp.x * sr,
++                           right.y * cr + pitchedUp.y * sr,
++                           right.z * cr + pitchedUp.z * sr};
++    const Vec3 tiltedUp{pitchedUp.x * cr - right.x * sr,
++                        pitchedUp.y * cr - right.y * sr,
++                        pitchedUp.z * cr - right.z * sr};
++    Mtx34 result = stable;
++    result[0] = tiltedRight.x; result[1] = tiltedUp.x; result[2] = pitchedForward.x;
++    result[4] = tiltedRight.y; result[5] = tiltedUp.y; result[6] = pitchedForward.y;
++    result[8] = tiltedRight.z; result[9] = tiltedUp.z; result[10] = pitchedForward.z;
++    if (level == FirstPersonMotionLevel::TiltAndLateral && visual &&
++        IsFiniteMtx34(*visual) && IsFiniteFloat(&max_lateral_units) && max_lateral_units > 0) {
++        const Vec3 delta{(*visual)[3] - stable[3], (*visual)[7] - stable[7],
++                         (*visual)[11] - stable[11]};
++        const float side = std::clamp(Dot(delta, right), -max_lateral_units, max_lateral_units);
++        result[3] += right.x * side;
++        result[7] += right.y * side;
++        result[11] += right.z * side;
++    }
++    if (!IsFiniteMtx34(result)) return false;
++    out = result;
++    return true;
++}
++
++// The safe camera rejects short bumps and small inclines. Once a sustained
++// incline crosses the threshold, its pitch/bank are eased and speed limited.
++// Position and heading always come from the stable simulation pose.
++class SafeTiltFilter {
++public:
++    void Reset() noexcept { pitch_ = {}; roll_ = {}; }
++
++    bool Update(const Mtx34& stable, const Mtx34& physics, bool animated_event,
++                float dt, Mtx34& out) noexcept {
++        using namespace detail;
++        Mtx34 raw{};
++        if (!ComposeFirstPersonMotionPose(stable, physics, nullptr,
++                                          FirstPersonMotionLevel::Tilt, animated_event, 0, raw)) {
++            Reset();
++            return false;
++        }
++        if (!IsFiniteFloat(&dt) || dt <= 0) dt = 1.0f / 60.0f;
++        dt = std::min(dt, 0.05f);
++        const float rawPitch = std::asin(std::clamp(raw[6], -1.0f, 1.0f));
++        const float rawRoll = std::atan2(raw[4], raw[5]);
++        const float pitch = Advance(pitch_, rawPitch, dt);
++        const float roll = Advance(roll_, rawRoll, dt);
++
++        Vec3 forward{stable[2], 0, stable[10]};
++        if (!Normalize(forward)) { Reset(); return false; }
++        const Vec3 worldUp{0,1,0};
++        Vec3 right = Cross(worldUp, forward);
++        if (!Normalize(right)) { Reset(); return false; }
++        const float cp = std::cos(pitch), sp = std::sin(pitch);
++        const float cr = std::cos(roll), sr = std::sin(roll);
++        const Vec3 pitchedForward{forward.x * cp, sp, forward.z * cp};
++        const Vec3 pitchedUp{-forward.x * sp, cp, -forward.z * sp};
++        const Vec3 tiltedRight{right.x * cr + pitchedUp.x * sr,
++                               right.y * cr + pitchedUp.y * sr,
++                               right.z * cr + pitchedUp.z * sr};
++        const Vec3 tiltedUp{pitchedUp.x * cr - right.x * sr,
++                            pitchedUp.y * cr - right.y * sr,
++                            pitchedUp.z * cr - right.z * sr};
++        out = stable;
++        out[0] = tiltedRight.x; out[1] = tiltedUp.x; out[2] = pitchedForward.x;
++        out[4] = tiltedRight.y; out[5] = tiltedUp.y; out[6] = pitchedForward.y;
++        out[8] = tiltedRight.z; out[9] = tiltedUp.z; out[10] = pitchedForward.z;
++        return IsFiniteMtx34(out);
++    }
++
++private:
++    struct Axis { float angle = 0, pending = 0; bool active = false; };
++    Axis pitch_{}, roll_{};
++
++    static float Advance(Axis& axis, float raw, float dt) noexcept {
++        constexpr float kEnter = 14.0f * 3.141592654f / 180.0f;
++        constexpr float kExit = 8.0f * 3.141592654f / 180.0f;
++        constexpr float kMaximum = 25.0f * 3.141592654f / 180.0f;
++        constexpr float kMaxSpeed = 45.0f * 3.141592654f / 180.0f;
++        if (std::abs(raw) <= kExit) { axis.active = false; axis.pending = 0; }
++        else if (!axis.active) {
++            if (std::abs(raw) >= kEnter) axis.pending += dt;
++            else axis.pending = 0;
++            if (axis.pending >= 0.18f) axis.active = true;
++        }
++        const float target = axis.active ? std::clamp(raw, -kMaximum, kMaximum) : 0.0f;
++        const float blend = 1.0f - std::exp(-dt / 0.55f);
++        axis.angle += std::clamp((target - axis.angle) * blend, -kMaxSpeed * dt,
++                                 kMaxSpeed * dt);
++        if (!axis.active && std::abs(axis.angle) < 0.00001f) axis.angle = 0;
++        return axis.angle;
++    }
++};
++
+ inline Mtx34 ComputeDioramaAnchor(float distance, float height) noexcept {
+     const float pitch = std::atan2(height, distance);
+     const float c = std::cos(pitch), s = std::sin(pitch);
+@@ -379,6 +552,10 @@ void MkwVRFirstPersonApplyConfiguredSettings() noexcept;
+ // race_camera_address is the frame's own RaceCamera, or zero if none was seen.
+ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_address) noexcept;
+ 
++// The original race camera's world-space eye, refreshed before HUD controls
++// draw. Name balloons use it to put their existing 2D artwork at kart depth.
++bool MkwVRFirstPersonGetRaceCameraPosition(float out[3]) noexcept;
++
+ // Drops every captured pointer and the held anchor. Call on race entry/exit.
+ void MkwVRFirstPersonReset() noexcept;
+ // Guest thread only, immediately after the frame's draws have been recorded.
+diff --git a/runtime/src/settings_overlay.cpp b/runtime/src/settings_overlay.cpp
+index 4b1f6b9..ed988e2 100644
+--- a/runtime/src/settings_overlay.cpp
++++ b/runtime/src/settings_overlay.cpp
+@@ -896,6 +896,19 @@ void DrawVrSettings() {
+                 bool nativeWheel = RuntimeConfigFile::VrNativeSteeringWheel();
+                 if (ImGui::Checkbox("Use the vehicle's original steering wheel", &nativeWheel))
+                     RuntimeConfigFile::SetVrNativeSteeringWheel(nativeWheel);
++                bool followVehicleMotion = RuntimeConfigFile::VrFirstPersonFollowVehicleMotion();
++                if (ImGui::Checkbox("Follow kart motion in first person", &followVehicleMotion))
++                    RuntimeConfigFile::SetVrFirstPersonFollowVehicleMotion(followVehicleMotion);
++                if (followVehicleMotion) {
++                    const int savedLevel = RuntimeConfigFile::VrFirstPersonMotionLevel();
++                    int motionLevel = savedLevel == 4 ? 0 : savedLevel;
++                    if (ImGui::Combo("Kart motion detail", &motionLevel,
++                                     "Safe: large slopes only\0Tilt only\0Tilt + side-to-side\0All motion (hits + tricks)\0"))
++                        RuntimeConfigFile::SetVrFirstPersonMotionLevel(motionLevel == 0 ? 4 : motionLevel);
++                    ImGui::TextWrapped("Safe ignores small bumps, waits for a sustained large incline and eases the view into a limited tilt. Tilt follows all track pitch and bank. Side-to-side adds lateral sway. All motion includes item hits, spins and tricks.");
++                } else {
++                    ImGui::TextWrapped("Off keeps the first-person horizon level. Changes apply immediately.");
++                }
+                 ImGui::TextWrapped("First person: grab at the vehicle's original wheel or handlebars. Adds steering rotation to static kart wheel geometry. Turn off to use the VR wheel. Falls back to the VR wheel if vehicle grip positions are unavailable.");
+                 ImGui::TextWrapped("Motorbikes use handlebars with grip zones fitted to the bike. Turn horizontally: pull your right hand back to turn right, or your left hand back to turn left. 45 degrees gives full steering. With the original model disabled, a VR handlebar replaces the circular wheel.");
+                 ImGui::TextWrapped("Once grabbed, controls stay attached until you release the grip. Larger grab zones help with wide handlebars. Bike handlebars stay level during banking. The seat automatically stays behind the controls.");
+diff --git a/runtime/src/vr/mkw_vr_culling.cpp b/runtime/src/vr/mkw_vr_culling.cpp
+index 80e7815..74ef840 100644
+--- a/runtime/src/vr/mkw_vr_culling.cpp
++++ b/runtime/src/vr/mkw_vr_culling.cpp
+@@ -35,7 +35,9 @@ bool WithinGuestOmnidirectionalRange(uint32_t frustum_address, uint32_t box_addr
+     return WithinOmnidirectionalRange(frustum, box);
+ }
+ 
+-void UpdateClipInfoForVr(CpuContext* context) {
++} // namespace
++
++extern "C" void UpdateClipInfoForVr(CpuContext* context) {
+     const uint32_t manager = context->gpr[3];
+     // Keep the game's distance, area and object-state calculations intact.
+     // This function runs once per game tick, before objects use its screen flags.
+@@ -69,8 +71,6 @@ void UpdateClipInfoForVr(CpuContext* context) {
+     }
+ }
+ 
+-} // namespace
+-
+ extern "C" void IntersectAabbForVr(CpuContext* context) {
+     const uint32_t frustum = context->gpr[3];
+     const uint32_t box = context->gpr[4];
+diff --git a/runtime/src/vr/mkw_vr_first_person.cpp b/runtime/src/vr/mkw_vr_first_person.cpp
+index d2abfc0..efd2420 100644
+--- a/runtime/src/vr/mkw_vr_first_person.cpp
++++ b/runtime/src/vr/mkw_vr_first_person.cpp
+@@ -162,16 +162,20 @@ KartPoseRead ReadPlayerKartPose(uint32_t camera, Mtx34& out) noexcept {
+ 
+ struct FirstPersonState {
+     CockpitStabilizer stabilizer;
++    SafeTiltFilter safe_tilt;
+     uint64_t stabilized_frame = 0;
+     SeatedEyeReference seated_eye{};
+     uint32_t seated_driver=0;
+     std::optional<float> cockpit_forward;
+     CameraMode mode = CameraMode::Game;
++    bool bullet_active = false;
+     bool opening_pending = false;
+     FirstPersonHeadOffsets offsets{};
+     float units_per_meter = 100.0f;
+ 
+     uint32_t camera_address = 0;
++    std::array<float, 3> race_camera_world{};
++    bool race_camera_world_valid = false;
+ 
+     FirstPersonAnchor anchor{};
+     int hold_frames = 0;
+@@ -479,6 +483,7 @@ void MkwVRCycleCamera() noexcept {
+     if(g_state.opening_pending) return;
+     g_state.mode = NextCameraMode(g_state.mode);
+     g_state.stabilizer = {};
++    g_state.safe_tilt.Reset();
+     g_state.anchor = {};
+     g_state.hold_frames = 0;
+     g_state.failure_logged = false;
+@@ -492,13 +497,23 @@ CameraMode MkwVRGetCameraMode() noexcept {
+     return g_state.mode;
+ }
+ 
++bool IsTrickAnimating(uint32_t movement) noexcept {
++    // Kart::Link::GetTrick (80591914) returns Movement+0x258. Trick::Start
++    // (8057616C) sets bit 0x400000 through these two links; Trick::End
++    // (805766B8) clears it. Comfort modes must exclude that animation.
++    uint32_t trick=0, owner=0, state=0, flags=0;
++    return movement && ReadGuestPointer(movement+0x258,trick) &&
++        ReadGuestPointer(trick,owner) && ReadGuestPointer(owner+4,state) &&
++        Memory::TryRead32(state+8,flags) && (flags&0x400000u)!=0;
++}
++
+ bool MkwVRRaceIntroActive() noexcept {
+     std::lock_guard lock(g_mutex);
+     return g_state.opening_pending;
+ }
+ FirstPersonCameraSnapshot MkwVRFirstPersonGetSnapshot() noexcept {
+     std::lock_guard lock(g_mutex);
+-    return {g_state.mode,g_state.anchor};
++    return {EffectiveCameraMode(g_state.mode, g_state.bullet_active),g_state.anchor};
+ }
+ 
+ void MkwVRSetCameraMode(CameraMode mode) noexcept {
+@@ -507,6 +522,7 @@ void MkwVRSetCameraMode(CameraMode mode) noexcept {
+     g_state.anchor = {};
+     g_state.hold_frames = 0;
+     g_state.stabilizer = {};
++    g_state.safe_tilt.Reset();
+ }
+ 
+ void MkwVRFirstPersonApplyConfiguredSettings() noexcept {
+@@ -528,17 +544,21 @@ void MkwVRFirstPersonReset() noexcept {
+     MkwVRFirstPersonRestoreDriver();
+     std::lock_guard lock(g_mutex);
+     g_state.mode = CameraMode::Game;
++    g_state.bullet_active = false;
+     g_state.opening_pending = true;
+     g_state.seated_driver=0;
+     g_state.seated_eye={};
+     g_state.cockpit_forward.reset();
+     g_state.camera_address = 0;
++    g_state.race_camera_world = {};
++    g_state.race_camera_world_valid = false;
+     g_state.anchor = {};
+     g_state.hold_frames = 0;
+     g_state.ever_valid_this_race = false;
+     g_state.failure_logged = false;
+     g_state.logged_frame = 0;
+     g_state.stabilizer = {};
++    g_state.safe_tilt.Reset();
+     g_state.stabilized_frame = 0;
+ }
+ 
+@@ -561,40 +581,61 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
+         RT_LOG(RT_TAG_RUNTIME) << "[mkw-vr] race introduction finished: stage=" << stage
+                               << ", frame=" << guest_frame_index << std::endl;
+     }
+-    if (g_state.mode == CameraMode::Game) {
+-        Mtx34 unused{};
+-        const auto kart=ReadPlayerKartPose(race_camera_address, unused);
++    Mtx34 kart_from_local{};
++    const auto kart = ReadPlayerKartPose(race_camera_address, kart_from_local);
++    Mtx34 view_from_world{};
++    const bool needRaceView = g_state.mode != CameraMode::Game ||
++                              MkwVRPolicyGetSnapshot().session_active;
++    const bool view_valid = needRaceView && ReadRaceCameraViewMatrix(
++        TryGetCpuContext(), race_camera_address, view_from_world);
++    g_state.race_camera_world_valid = view_valid;
++    if (view_valid) {
++        // Inverse of the rigid RaceCamera view matrix: camera = -R^T * t.
++        for (int axis = 0; axis < 3; ++axis) {
++            g_state.race_camera_world[axis] =
++                -(view_from_world[axis] * view_from_world[3] +
++                  view_from_world[4 + axis] * view_from_world[7] +
++                  view_from_world[8 + axis] * view_from_world[11]);
++        }
++    }
++    // KartAIController::IsInABill (80726560) tests bit 27 of the local
++    // Kart::Status flags at +0x0C. Preserve the user's selected camera and
++    // only suspend its VR anchor while the Bullet Bill is actually active.
++    uint32_t status = 0, status_flags = 0;
++    if (kart.accessor && ReadGuestPointer(kart.accessor + 0x04u, status) &&
++        Memory::TryRead32(status + 0x0Cu, status_flags))
++        g_state.bullet_active = IsBulletBillActive(status_flags);
++    if (g_state.mode == CameraMode::Game || g_state.bullet_active) {
+         std::array<float,3> eye{};
+         if(!kart.failed_step) ReadDriverEye(kart,eye);
+         g_state.stabilizer = {};
++        g_state.safe_tilt.Reset();
+         g_state.anchor = {};
+         g_state.hold_frames = 0;
+         return;
+     }
+     g_state.camera_address = race_camera_address;
+ 
+-    Mtx34 view_from_world{};
+-    Mtx34 kart_from_local{};
+     Mtx34 anchor{};
+-    KartPoseRead kart{};
+     float renderUnits=g_state.units_per_meter;
+     std::array<float,3> playerScale{1,1,1};
+     std::array<float, 3> eye{0.0f, g_state.offsets.up * g_state.units_per_meter, 0.0f};
+     const char* failed_step = nullptr;
+     if (race_camera_address == 0) {
+         failed_step = "race camera (none updated this frame)";
+-    } else if (!ReadRaceCameraViewMatrix(TryGetCpuContext(), race_camera_address,
+-                                         view_from_world)) {
++    } else if (!view_valid) {
+         failed_step = "race camera view matrix";
+-    } else if (kart = ReadPlayerKartPose(race_camera_address, kart_from_local); kart.failed_step != nullptr) {
++    } else if (kart.failed_step != nullptr) {
+         failed_step = kart.failed_step;
+     } else if (g_state.mode == CameraMode::Far) {
+         g_state.stabilizer = {};
++        g_state.safe_tilt.Reset();
+         if (!ComputeKartDioramaAnchor(view_from_world, kart_from_local,
+                 RuntimeConfigFile::VrDioramaDistance(), RuntimeConfigFile::VrDioramaHeight(), anchor)) {
+             failed_step = "diorama anchor math";
+         }
+     } else {
++        const Mtx34 physics_from_local = kart_from_local;
+         // Kart::Link::GetKartPosition (8059020C) returns dynamics+68.
+         // Movement::dir (+5C), unlike the physics pose, excludes damage spin,
+         // trick rotations and visual pitch/roll. Accessor offsets are proven
+@@ -664,7 +705,34 @@ void MkwVRFirstPersonUpdate(uint64_t guest_frame_index, uint32_t race_camera_add
+         eye[2] += (g_state.offsets.forward - 1.2f) * renderUnits;
+         for(int axis=0;axis<3;++axis) eye[axis]*=playerScale[axis];
+         renderUnits*=playerScale[1];
+-        if (!ComputeFirstPersonAnchor(view_from_world, kart_from_local, eye[0], eye[1], eye[2],
++        // Comfort levels take only track tilt from the physics pose, then
++        // optionally the rendered body's sideways displacement. Full motion
++        // takes the whole rendered pose, including damage spins and tricks.
++        // Any invalid animated frame falls back to the stable simulation pose.
++        bool vehicleMotionAnchor = false;
++        if (RuntimeConfigFile::VrFirstPersonFollowVehicleMotion()) {
++            const auto level = static_cast<FirstPersonMotionLevel>(RuntimeConfigFile::VrFirstPersonMotionLevel());
++            Mtx34 visualBody{};
++            const Mtx34* visual = level != FirstPersonMotionLevel::Tilt &&
++                level != FirstPersonMotionLevel::Safe &&
++                ReadGuestMtx34(kart.body + 0x1c, visualBody) ? &visualBody : nullptr;
++            Mtx34 motionPose{};
++            const bool animatedEvent = damageType != UINT32_MAX || IsTrickAnimating(movement);
++            const bool motionReady = level == FirstPersonMotionLevel::Safe
++                ? g_state.safe_tilt.Update(kart_from_local, physics_from_local, animatedEvent,
++                                           dt, motionPose)
++                : ComposeFirstPersonMotionPose(kart_from_local, physics_from_local, visual, level,
++                                               animatedEvent, renderUnits * 0.75f, motionPose);
++            if (level != FirstPersonMotionLevel::Safe) g_state.safe_tilt.Reset();
++            if (motionReady &&
++                ComputeFirstPersonAnchor(view_from_world, motionPose, eye[0], eye[1], eye[2],
++                                         true, anchor, true, true)) {
++                kart_from_local = motionPose;
++                vehicleMotionAnchor = true;
++            }
++        } else g_state.safe_tilt.Reset();
++        if (!vehicleMotionAnchor &&
++            !ComputeFirstPersonAnchor(view_from_world, kart_from_local, eye[0], eye[1], eye[2],
+                                       true, anchor, true))
+             failed_step = "driver eye anchor math";
+     }
+@@ -783,6 +851,14 @@ FirstPersonAnchor MkwVRFirstPersonGetAnchor() noexcept {
+     return g_state.anchor;
+ }
+ 
++bool MkwVRFirstPersonGetRaceCameraPosition(float out[3]) noexcept {
++    if (out == nullptr) return false;
++    std::lock_guard lock(g_mutex);
++    if (!g_state.race_camera_world_valid) return false;
++    std::copy(g_state.race_camera_world.begin(), g_state.race_camera_world.end(), out);
++    return true;
++}
++
+ void MkwVRFirstPersonRestoreDriver() noexcept {
+     aurora_clear_native_wheel_vertices();
+     for (auto& model : g_hidden_models) {
+diff --git a/runtime/src/vr/mkw_vr_instrumentation.cpp b/runtime/src/vr/mkw_vr_instrumentation.cpp
+index d93af39..f601768 100644
+--- a/runtime/src/vr/mkw_vr_instrumentation.cpp
++++ b/runtime/src/vr/mkw_vr_instrumentation.cpp
+@@ -7,10 +7,12 @@
+ #include "runtime_log.h"
+ #include "vr/mkw_vr_first_person.h"
+ #include "vr/mkw_vr_policy.h"
++#include <aurora/gfx.h>
+ 
+ #include <algorithm>
+ #include <array>
+ #include <cstdint>
++#include <cmath>
+ #include <mutex>
+ 
+ extern "C" int g_gxFrameCount;
+@@ -22,6 +24,10 @@ constexpr uint32_t kRaceSceneOnEnter = 0x80553C50u;
+ constexpr uint32_t kRaceSceneOnExit = 0x805549B0u;
+ constexpr uint32_t kRaceCameraUpdate = 0x805A21D0u;
+ constexpr uint32_t kScnMgrRaceDraw = 0x805B1CD8u;
++constexpr uint32_t kLayoutUIControlDraw = 0x8063DB84u;
++constexpr uint32_t kNameBalloonUpdatePosition = 0x807F1094u;
++// CtrlRaceNameBalloon::__ct installs this vtable (PAL RMCP01).
++constexpr uint32_t kNameBalloonVtable = 0x808D3E58u;
+ // PAL RMCP01 RaceScene::GetScreenCount (0x80554F68) reads the active
+ // RaceScene pointer from this SDA-backed slot, then returns byte 0x25. Keep
+ // this synchronized with projects/mkwii/MAP.txt and the generated function.
+@@ -34,11 +40,41 @@ struct InstrumentationState {
+     uint32_t camera_count = 0;
+     uint32_t last_reported_camera_count = UINT32_MAX;
+     uint32_t last_reported_screen_count = UINT32_MAX;
++    struct NameplatePlayer {
++        uint32_t control = 0;
++        uint32_t player = 0;
++    };
++    std::array<NameplatePlayer, 48> nameplate_players{};
++    uint32_t nameplate_player_count = 0;
+ };
+ 
+ std::mutex g_instrumentation_mutex;
+ InstrumentationState g_instrumentation;
+ 
++void RememberNameplatePlayer(uint32_t control, uint32_t player) noexcept {
++    if (control == 0 || player >= 12) return;
++    std::lock_guard lock(g_instrumentation_mutex);
++    for (uint32_t i = 0; i < g_instrumentation.nameplate_player_count; ++i) {
++        auto& entry = g_instrumentation.nameplate_players[i];
++        if (entry.control == control) {
++            entry.player = player;
++            return;
++        }
++    }
++    if (g_instrumentation.nameplate_player_count < g_instrumentation.nameplate_players.size())
++        g_instrumentation.nameplate_players[g_instrumentation.nameplate_player_count++] =
++            {control, player};
++}
++
++uint32_t NameplatePlayer(uint32_t control) noexcept {
++    std::lock_guard lock(g_instrumentation_mutex);
++    for (uint32_t i = 0; i < g_instrumentation.nameplate_player_count; ++i) {
++        const auto& entry = g_instrumentation.nameplate_players[i];
++        if (entry.control == control) return entry.player;
++    }
++    return UINT32_MAX;
++}
++
+ uint64_t GuestFrame() noexcept {
+     return static_cast<uint64_t>(static_cast<uint32_t>(g_gxFrameCount));
+ }
+@@ -137,9 +173,48 @@ void PublishObservedCamera(uint64_t frame, uint32_t address) noexcept {
+     MkwVRPolicyPublishRaceCamera(camera);
+ }
+ 
++void ObserveRaceUiControl(const CpuContext* context) noexcept {
++    aurora_set_stereo_hud_world_depth(0.f);
++    if (context == nullptr) return;
++    const uint32_t control = context->gpr[3];
++    uint32_t vtable = 0;
++    if (!Memory::TryRead32(control, vtable)) return;
++    if (vtable != kNameBalloonVtable || !Memory::Contains(control, 388)) return;
++    uint32_t positions = 0;
++    uint32_t pane = 0;
++    if (!Memory::TryRead32(control + 380, positions) ||
++        !Memory::TryRead32(control + 384, pane) ||
++        !Memory::Contains(pane + 44, 8)) return;
++    float camera[3]{};
++    if (!MkwVRFirstPersonGetRaceCameraPosition(camera)) return;
++    try {
++        // OnUpdate can choose either its stored racer or a spectator target.
++        // Use the exact index passed to UpdatePosition for this control.
++        const uint32_t player = NameplatePlayer(control);
++        if (player >= 12 || !Memory::Contains(positions + 32 + player * 12, 12)) return;
++        const float anchorX = Memory::ReadFloat32(pane + 44);
++        const float anchorY = Memory::ReadFloat32(pane + 48);
++        if (!std::isfinite(anchorX) || !std::isfinite(anchorY)) return;
++        float distance2 = 0.f;
++        for (uint32_t axis = 0; axis < 3; ++axis) {
++            const float position = Memory::ReadFloat32(positions + 32 + player * 12 + 4 * axis);
++            if (!std::isfinite(position)) return;
++            const float delta = position - camera[axis];
++            distance2 += delta * delta;
++        }
++        if (std::isfinite(distance2) && distance2 > 0.f) {
++            aurora_set_stereo_hud_world_anchor(anchorX, anchorY);
++            aurora_set_stereo_hud_world_depth(std::sqrt(distance2));
++        }
++    } catch (const Memory::AccessViolation&) {
++        // A control being torn down keeps the ordinary 2D presentation.
++    }
++}
++
+ } // namespace
+ 
+ void MkwVRInstrumentationInitialize() noexcept {
++    aurora_set_stereo_hud_world_depth(0.f);
+     MkwVRPolicySetAvailableBindings(
+         MkwVRBindingSceneState | MkwVRBindingRaceCamera |
+         MkwVRBindingDrawClassification | MkwVRBindingCulling);
+@@ -153,6 +228,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
+     const uint64_t frame = GuestFrame();
+     switch (address) {
+     case kRaceSceneOnEnter: {
++        aurora_set_stereo_hud_world_depth(0.f);
+         {
+             std::lock_guard lock(g_instrumentation_mutex);
+             g_instrumentation = {};
+@@ -172,6 +248,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
+         break;
+     }
+     case kScnMgrRaceDraw: {
++        aurora_set_stereo_hud_world_depth(0.f);
+         // RaceCamera objects are not a player-count source: the game may update
+         // additional cameras for transitions and effects. Use the same exact
+         // screen count as RaceScene::GetScreenCount, while retaining the camera
+@@ -187,6 +264,7 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
+         break;
+     }
+     case kRaceSceneOnExit: {
++        aurora_set_stereo_hud_world_depth(0.f);
+         MkwVRSceneObservation scene{};
+         scene.mode = VRSceneMode::Other;
+         scene.guest_frame_index = frame;
+@@ -197,6 +275,13 @@ extern "C" void MkwVRObserveTranslatedFunctionEntry(uint32_t address,
+                                << std::endl;
+         break;
+     }
++    case kLayoutUIControlDraw:
++        ObserveRaceUiControl(context);
++        break;
++    case kNameBalloonUpdatePosition:
++        if (context != nullptr)
++            RememberNameplatePlayer(context->gpr[3], context->gpr[4] & 0xffu);
++        break;
+     default:
+         break;
+     }
+diff --git a/runtime/src/vr/openxr_integration.cpp b/runtime/src/vr/openxr_integration.cpp
+index a252aae..f5cd24c 100644
+--- a/runtime/src/vr/openxr_integration.cpp
++++ b/runtime/src/vr/openxr_integration.cpp
+@@ -556,6 +556,8 @@ private:
+             if (!display.xr_frame.should_render) ++runtime_hidden;
+             if (display.xr_frame.should_render && !display.xr_frame.views_valid) ++invalid_views;
+             if (!delivery.PendingToken() && coherent && display.xr_frame.should_render && display.xr_frame.views_valid) {
++                const bool refresh_menu = !immersive && display.presentation.anchored &&
++                    aurora_can_refresh_vr_menu(policy.content_tag);
+                 if (!backend_->BeginSubmission(display)) {
+                     SetError(backend_->LastError());
+                     backend_->FinishDisplayFrame(display, false);
+@@ -564,9 +566,26 @@ private:
+                 pending = display;
+                 pending_start = Clock::now();
+                 delivery.Start(pending.xr_frame.serial, policy.content_tag, session);
+-                std::lock_guard lock(published_mutex_);
+-                BuildPublishedFrame(pending, immersive, policy.EffectiveUnitsPerMeter(), policy.content_tag);
+-                published_.store(&published_frame_, std::memory_order_release);
++                {
++                    std::lock_guard lock(published_mutex_);
++                    BuildPublishedFrame(pending, immersive, policy.EffectiveUnitsPerMeter(), policy.content_tag);
++                    if (!refresh_menu)
++                        published_.store(&published_frame_, std::memory_order_release);
++                }
++                if (refresh_menu && !aurora_refresh_vr_menu(&published_frame_.frame)) {
++                    // A menu-to-race transition can invalidate the cached mono
++                    // source between the availability check and this call.
++                    // Cancel only an unencoded target; never release an image
++                    // that the D3D12 bridge has already handed to the GPU.
++                    if (!backend_->TryCancelPendingFrame(pending) ||
++                        !backend_->DiscardCanceledSubmission()) {
++                        SetError("VR menu refresh failed after OpenXR image acquisition");
++                        backend_->FinishDisplayFrame(display, false);
++                        break;
++                    }
++                    delivery.Cancel();
++                    ++cancellations;
++                }
+             }
+             // A fresh pose is required to render, not to reproject the last
+             // completed image with its original, valid render poses.
+diff --git a/runtime/tests/config_write_tests.cpp b/runtime/tests/config_write_tests.cpp
+index a23599e..23ff423 100644
+--- a/runtime/tests/config_write_tests.cpp
++++ b/runtime/tests/config_write_tests.cpp
+@@ -15,18 +15,31 @@ int main() {
+     ok &= RuntimeConfigFile::WiiContinuousScanEnabled();
+     RuntimeConfigFile::Mutable().wiiContinuousScan = false;
+     ok &= !RuntimeConfigFile::WiiContinuousScanEnabled();
++    RuntimeConfigFile::Mutable().vrFirstPersonFollowVehicleMotion.reset();
++    ok &= RuntimeConfigFile::VrFirstPersonFollowVehicleMotion();
++    RuntimeConfigFile::Mutable().vrFirstPersonFollowVehicleMotion = false;
++    ok &= !RuntimeConfigFile::VrFirstPersonFollowVehicleMotion();
+     std::istringstream legacyScan("[controller]\nwii_continuous_scan = true\n");
+     ok &= !RuntimeConfigFile::ParseConfig(legacyScan,"legacy").wiiContinuousScan.value_or(false);
+     std::istringstream explicitScan("[controller]\nwii_continuous_scan_opt_in = true\n");
+     ok &= RuntimeConfigFile::ParseConfig(explicitScan,"opt-in").wiiContinuousScan.value_or(false);
++    std::istringstream previousMotion("[vr]\nfirst_person_follow_vehicle_motion = true\n");
++    const auto previousConfig=RuntimeConfigFile::ParseConfig(previousMotion,"previous-motion");
++    ok &= previousConfig.vrFirstPersonFollowVehicleMotion.value_or(false) &&
++        previousConfig.vrFirstPersonMotionLevel==3;
++    std::istringstream newMotion("[vr]\nfirst_person_follow_vehicle_motion = false\n");
++    ok &= RuntimeConfigFile::ParseConfig(newMotion,"new-motion").vrFirstPersonMotionLevel==4;
+     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","welcome_complete","true");
+     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","tutorial_completed","3");
+     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","default_camera","2");
++    ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","first_person_follow_vehicle_motion","true");
++    ok &= RuntimeConfigFile::WriteSettingAtPath(path,"vr","first_person_motion_level","4");
+     ok &= RuntimeConfigFile::WriteSettingAtPath(path,"controller","wii_continuous_scan_opt_in","false");
+     const auto content=read();
+     std::istringstream stream(content);
+     const auto config=RuntimeConfigFile::ParseConfig(stream,"test");
+-    ok &= config.vrWelcomeComplete && config.vrDefaultCamera==2 && config.vrTutorialCompleted==3;
++    ok &= config.vrWelcomeComplete && config.vrDefaultCamera==2 && config.vrTutorialCompleted==3 &&
++        config.vrFirstPersonFollowVehicleMotion.value_or(false) && config.vrFirstPersonMotionLevel==4;
+     ok &= content.find("# Keep my settings")!=std::string::npos && content.find("window_width = 854")!=std::string::npos;
+     fs::create_directory(root/"Config.toml.pending");
+     ok &= !RuntimeConfigFile::WriteSettingAtPath(path,"vr","default_camera","0") && read()==content;
+diff --git a/runtime/tests/vr_first_person_tests.cpp b/runtime/tests/vr_first_person_tests.cpp
+index 91e1dbc..d966ed6 100644
+--- a/runtime/tests/vr_first_person_tests.cpp
++++ b/runtime/tests/vr_first_person_tests.cpp
+@@ -192,10 +192,147 @@ void TestDegenerateKartPoseIsRejected() {
+           "a collapsed view matrix must be rejected");
+ }
+ 
++void TestVehicleMotionFollowsFullPose() {
++    // A kart banked 90 degrees about its forward axis. The chase camera has
++    // independent pitch; the ride-along view must use the kart's complete
++    // orientation while keeping its seat exactly at the eye origin.
++    const Mtx34 body{0,-1,0,100, 1,0,0,20, 0,0,1,30};
++    const Mtx34 view=PitchedViewAt(100,80,160,0.35f);
++    Mtx34 ride{};
++    Check(ComputeFirstPersonAnchor(view,body,0,1,0,true,ride,true,true),
++          "ride-along camera accepts a banked visual body pose");
++    const auto eye=mkw::vr::detail::TransformPoint(body,0,1,0);
++    float recordedEye[3]{},anchoredEye[3]{};
++    Apply(view,eye.x,eye.y,eye.z,recordedEye);
++    Apply(ride,recordedEye[0],recordedEye[1],recordedEye[2],anchoredEye);
++    for(float value:anchoredEye) CheckNear(value,0,"ride-along eye remains attached to the seat");
++    const auto kartUp=mkw::vr::detail::TransformPoint(body,0,2,0);
++    float recordedUp[3]{},anchoredUp[3]{};
++    Apply(view,kartUp.x,kartUp.y,kartUp.z,recordedUp);
++    Apply(ride,recordedUp[0],recordedUp[1],recordedUp[2],anchoredUp);
++    CheckNear(anchoredUp[0],0,"banked kart up is not sideways in ride-along view");
++    CheckNear(anchoredUp[1],1,"banked kart up becomes headset up");
++    CheckNear(anchoredUp[2],0,"banked kart up has no forward component");
++
++    // Damage yaw must rotate the view as well, rather than being filtered by
++    // the stabilizer. These two poses face opposite directions.
++    const Mtx34 forward=KartAt(0,0,0);
++    const Mtx34 backward{-1,0,0,0, 0,1,0,0, 0,0,-1,0};
++    Mtx34 before{},after{};
++    Check(ComputeFirstPersonAnchor(kIdentityMtx34,forward,0,0,0,true,before,true,true) &&
++          ComputeFirstPersonAnchor(kIdentityMtx34,backward,0,0,0,true,after,true,true),
++          "ride-along camera accepts a damage turn");
++    CheckNear(before[0],-after[0],"damage turn rotates the view horizontally");
++    CheckNear(before[10],-after[10],"damage turn reverses the view direction");
++}
++
++void TestVehicleMotionLevels() {
++    using mkw::vr::ComposeFirstPersonMotionPose;
++    using mkw::vr::FirstPersonMotionLevel;
++    const Mtx34 stable=KartAt(10,20,30);
++    const float angle=0.3f,c=std::cos(angle),s=std::sin(angle);
++    const Mtx34 physics{c,-s,0,10, s,c,0,20, 0,0,1,30};
++    // The visual body is displaced right and turned by an item animation.
++    const Mtx34 visual{-1,0,0,40, 0,1,0,20, 0,0,-1,30};
++    Mtx34 pose{};
++    Check(ComposeFirstPersonMotionPose(stable,physics,&visual,FirstPersonMotionLevel::Tilt,
++                                      false,75,pose),"tilt-only pose is available");
++    CheckNear(pose[0],c,"tilt-only keeps physical bank");
++    CheckNear(pose[4],s,"tilt-only banks with the kart");
++    CheckNear(pose[10],1,"tilt-only ignores the item's visual turn");
++    CheckNear(pose[3],10,"tilt-only ignores lateral animation");
++
++    Check(ComposeFirstPersonMotionPose(stable,physics,&visual,FirstPersonMotionLevel::TiltAndLateral,
++                                      false,75,pose),"tilt and lateral pose is available");
++    CheckNear(pose[4],s,"lateral mode preserves the physical bank");
++    CheckNear(pose[3],40,"lateral mode follows sideways seat motion");
++    CheckNear(pose[10],1,"lateral mode ignores the item's spin");
++    Check(ComposeFirstPersonMotionPose(stable,physics,&visual,FirstPersonMotionLevel::TiltAndLateral,
++                                      true,75,pose),"damage uses a stable comfort pose");
++    CheckNear(pose[3],10,"damage cannot fling the lateral comfort camera");
++    CheckNear(pose[4],0,"damage cannot bank the comfort camera");
++
++    Check(ComposeFirstPersonMotionPose(stable,physics,&visual,FirstPersonMotionLevel::Full,
++                                      true,75,pose),"full mode uses the animated pose during damage");
++    for(size_t i=0;i<pose.size();++i)
++        CheckNear(pose[i],visual[i],"full mode follows the complete vehicle animation");
++    Check(!ComposeFirstPersonMotionPose(stable,physics,nullptr,FirstPersonMotionLevel::Full,
++                                       false,75,pose),"missing visual pose falls back safely");
++}
++
++void TestSafeTilt() {
++    using mkw::vr::SafeTiltFilter;
++    const Mtx34 stable = KartAt(10,20,30);
++    auto pitched = [&](float angle) {
++        Mtx34 pose = stable;
++        pose[5] = std::cos(angle); pose[6] = std::sin(angle);
++        pose[9] = -std::sin(angle); pose[10] = std::cos(angle);
++        return pose;
++    };
++    SafeTiltFilter filter;
++    Mtx34 result{};
++    for (int frame=0; frame<120; ++frame)
++        Check(filter.Update(stable,pitched(0.10f),false,1.0f/60.0f,result),
++              "safe tilt accepts a small incline");
++    CheckNear(result[6],0,"safe tilt ignores minor slopes",0.001f);
++
++    for (int frame=0; frame<8; ++frame)
++        Check(filter.Update(stable,pitched(0.35f),false,1.0f/60.0f,result),
++              "safe tilt accepts a brief steep bump");
++    CheckNear(result[6],0,"safe tilt ignores a short steep bump",0.001f);
++    for (int frame=0; frame<60; ++frame)
++        filter.Update(stable,pitched(0.35f),false,1.0f/60.0f,result);
++    Check(result[6]>0.08f && result[6]<std::sin(0.35f),
++          "safe tilt follows a sustained incline gradually");
++    CheckNear(result[3],10,"safe tilt keeps stable horizontal position");
++    CheckNear(result[7],20,"safe tilt keeps stable elevation");
++    CheckNear(result[11],30,"safe tilt keeps stable depth");
++
++    filter.Update(stable,pitched(0),true,1.0f/60.0f,result);
++    Check(result[6]>0,"damage settles the safe view without a snap");
++    for (int frame=0; frame<240; ++frame)
++        filter.Update(stable,pitched(0),false,1.0f/60.0f,result);
++    CheckNear(result[6],0,"safe tilt returns to level after a hit",0.001f);
++
++    for (int frame=0; frame<120; ++frame)
++        filter.Update(stable,pitched(0.9f),false,1.0f/60.0f,result);
++    Check(std::asin(result[6])<0.44f,"safe tilt limits extreme inclines");
++    filter.Reset();
++    const float bank = 0.35f;
++    Mtx34 banked = stable;
++    banked[0] = std::cos(bank); banked[1] = -std::sin(bank);
++    banked[4] = std::sin(bank); banked[5] = std::cos(bank);
++    for (int frame=0; frame<90; ++frame)
++        filter.Update(stable,banked,false,1.0f/60.0f,result);
++    Check(result[4]>0.08f && result[4]<std::sin(bank),
++          "safe tilt eases sustained banking independently of pitch");
++    filter.Reset();
++    filter.Update(stable,pitched(0),false,1.0f/60.0f,result);
++    CheckNear(result[6],0,"safe tilt reset clears the previous race");
++}
++
++void TestBulletCameraOverride() {
++    using mkw::vr::CameraMode;
++    using mkw::vr::EffectiveCameraMode;
++    using mkw::vr::IsBulletBillActive;
++    Check(!IsBulletBillActive(0),"no Bullet Bill transformation");
++    Check(!IsBulletBillActive(0x04000000u),"another status bit does not trigger Bullet Bill");
++    Check(IsBulletBillActive(0x08000000u),"active Bullet Bill status is detected");
++    const CameraMode selected = CameraMode::FirstPerson;
++    Check(EffectiveCameraMode(selected,true) == CameraMode::Game,
++          "Bullet Bill temporarily uses the original camera");
++    Check(EffectiveCameraMode(selected,false) == selected,
++          "first person returns after Bullet Bill ends");
++    Check(EffectiveCameraMode(CameraMode::Far,true) == CameraMode::Game,
++          "Bullet Bill also overrides diorama temporarily");
++}
++
+ } // namespace
+ 
+ int main() {
+     using namespace mkw::vr;
++    TestBulletCameraOverride();
++    TestSafeTilt();
+     CockpitStabilizer stable;
+     auto simulation=KartAt(100,20,300);
+     auto seated=stable.Update(simulation,false,1.0f/60);
+@@ -255,6 +392,8 @@ int main() {
+     TestAnchorRotationStaysOrthonormal();
+     TestNonFiniteInputIsRejected();
+     TestDegenerateKartPoseIsRejected();
++    TestVehicleMotionFollowsFullPose();
++    TestVehicleMotionLevels();
+     // Character eye vertices use face-local axes (+X forward, -Y up), not
+     // the kart axes. Baby Mario and Bowser need different eye/neck offsets.
+     Mtx34 faceSmall{0,0,1,0, 0,-1,0,48.31057f, 1,0,0,-0.61309f};
+diff --git a/translator/src/Translator.Core/Build/TranslatedBuildShardEmitter.cs b/translator/src/Translator.Core/Build/TranslatedBuildShardEmitter.cs
+index 5368bbb..079ac6c 100644
+--- a/translator/src/Translator.Core/Build/TranslatedBuildShardEmitter.cs
++++ b/translator/src/Translator.Core/Build/TranslatedBuildShardEmitter.cs
+@@ -714,7 +714,11 @@ public static partial class TranslatedBuildShardEmitter
+         0x80008EF0 or 0x80008FB4 or 0x80009194 or 0x80243D18 or 0x80243D6C or 0x808897F0 or
+         0x802226D8 or 0x805C3218 or 0x805E7460 or 0x8063C470 or 0x8063C4D4 or 0x8063C560 or 0x8063C714 or
+         0x80198CA8 or 0x80199038 or 0x801992A8 or 0x801998A4 or 0x80226C78 or 0x80226EBC or 0x80229814 or 0x80229C5C or 0x80229DCC or 0x80229DD8 or
+-        0x801A7424 or 0x80672CC8 => true,
++        0x801A7424 or 0x80672CC8 or
++        // These addresses have VR culling overrides selected at runtime. The
++        // static translated edge would bypass both native registration and
++        // KnownNativeCpuCall, leaving coins tied to the kart-facing frustum.
++        0x80086610 or 0x80787774 => true,
+         _ => false
+     };
+ 
